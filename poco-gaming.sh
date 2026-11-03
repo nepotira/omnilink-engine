@@ -711,6 +711,24 @@ setup_dex_mode() {
     adb shell settings put global force_desktop_mode_on_external_displays 0 2>/dev/null || true
     DEX_MODE_ACTIVE=1
     log_success "Android Freeform Desktop environment activated."
+
+    # Detect or auto-install DroidUP Dex Launcher for full desktop UI (Taskbar, App drawer)
+    local launcher_pkg="com.levelup.droiduplauncher"
+    if ! adb shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
+        local apk_path="${SCRIPT_DIR}/payload/DroidUP-Dex-Launcher.apk"
+        if [ -f "$apk_path" ]; then
+            log_info "Installing Desktop DeX Launcher (${launcher_pkg})..."
+            adb install -r "$apk_path" 2>/dev/null || true
+        fi
+    fi
+
+    if adb shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
+        DEX_LAUNCHER_ACTIVE="$launcher_pkg"
+        log_success "Desktop DeX Launcher ready: ${launcher_pkg}"
+    else
+        DEX_LAUNCHER_ACTIVE=""
+        log_warn "DeX launcher app not found. Virtual display will run standard Android UI."
+    fi
 }
 
 restore_dex_mode() {
@@ -798,9 +816,13 @@ launch_scrcpy() {
         scrcpy_cmd+=("--force-adb-forward")
     fi
 
-    # Forced orientation in scrcpy capture if requested
+    # Forced orientation in scrcpy capture if requested.
+    # Note: When matching a landscape host (1920x1280), the display buffer is already horizontal.
+    # Applying @270 rotates a landscape display into portrait (1280x1920). Only rotate if explicit portrait is desired.
     if [ -n "$REQUESTED_ROTATION" ]; then
-        scrcpy_cmd+=("--capture-orientation=@${REQUESTED_ROTATION}")
+        if [ "$REQUESTED_ROTATION" = "0" ] || [ "$REQUESTED_ROTATION" = "180" ]; then
+            scrcpy_cmd+=("--capture-orientation=@${REQUESTED_ROTATION}")
+        fi
     fi
 
     case "$RUN_MODE" in
@@ -814,6 +836,11 @@ launch_scrcpy() {
             scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0")
             scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
             scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
+
+            # Auto-launch desktop environment launcher on virtual display
+            if [ -n "${DEX_LAUNCHER_ACTIVE:-}" ]; then
+                scrcpy_cmd+=("--start-app=${DEX_LAUNCHER_ACTIVE}")
+            fi
 
             [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off")
             [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")
