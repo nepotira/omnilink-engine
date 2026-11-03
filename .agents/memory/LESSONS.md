@@ -15,3 +15,7 @@
 ## 2026-11-03: GUI Apps must provide a direct double-clickable Desktop Launcher
 - **Context**: When asked for a Graphical User Interface, do not expect the user to open a terminal or type commands to execute it.
 - **Correction**: Always generate a `.desktop` file on the user's Desktop (`~/Área de trabalho/` or `~/Desktop`), set execution permissions (`chmod +x`), and mark it trusted (`gio set ... metadata::trusted true`) so double-clicking immediately launches the application window with full desktop styling without opening any terminal.
+
+## 2026-11-03: Aspect Ratio Rotation and Virtual Display Launcher
+- **Context**: Passing `--capture-orientation=@270` when the display buffer is already horizontal (1920x1280) rotates it into vertical portrait (1280x1920), creating severe black pillarboxes. Furthermore, Android `--new-display` creates a completely blank surface with no system launcher by default.
+- **Correction**: Do not apply `--capture-orientation` when matching landscape host geometry; only rotate if explicit portrait is requested. On `--new-display` (DeX mode), automatically start the desktop launcher (`--start-app=com.levelup.droiduplauncher`) to provide wallpaper, taskbar, and freeform app multitasking.
