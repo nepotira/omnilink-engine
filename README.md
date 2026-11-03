@@ -38,6 +38,20 @@ To allow scrcpy to control the device and inject low-latency hardware input:
 
 ## Quick Start
 
+### Graphical User Interface (Recommended)
+You can launch the native modern GUI app directly from the terminal or open it from the Zorin OS Application Menu under **Games / Utilities**:
+
+```bash
+cd /home/nepo/.gemini/antigravity/scratch/poco-game-engine
+./poco-gaming-gui
+```
+
+The GUI provides real-time battery and thermal telemetry, one-click profile switching (Gamer Max, Esports Eco, DeX, OTG Dock), instant rotation lock, and an emergency reset button.
+
+---
+
+### Command Line Interface (CLI)
+
 The script is completely self-contained ("Zero to Function") — it auto-detects missing dependencies and configures udev rules automatically on first run:
 
 ```bash
