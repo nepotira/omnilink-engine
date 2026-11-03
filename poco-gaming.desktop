@@ -2,12 +2,12 @@
 Version=1.0
 Type=Application
 Name=POCO Game Engine
-GenericName=Zero-Latency Mobile Gaming & Desktop Suite
-Comment=Play Android games at ultra-low latency with native resolution and controller support
+GenericName=Zero-Latency Mobile Gaming Suite
+Comment=Painel de Controle e Jogos para POCO e Xiaomi
 Exec=/home/nepo/.gemini/antigravity/scratch/poco-game-engine/poco-gaming-gui
+Path=/home/nepo/.gemini/antigravity/scratch/poco-game-engine
 Icon=/home/nepo/.gemini/antigravity/scratch/poco-game-engine/assets/poco-gaming.svg
 Terminal=false
-Categories=Game;Utility;HardwareSettings;
-Keywords=android;scrcpy;poco;gaming;dex;display;latency;
+Categories=Game;
 StartupNotify=true
 StartupWMClass=com.poco.gaming.engine
