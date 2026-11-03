@@ -91,9 +91,18 @@ log_step()    { echo -e "\n${C_BOLD}${C_BLUE}==>${C_RESET} ${C_BOLD}$*${C_RESET}
 # ------------------------------------------------------------------------------
 # Fail-Safe Cleanup Handler (POSIX Trap)
 # ------------------------------------------------------------------------------
+on_error() {
+    local line=$1
+    local cmd=$2
+    local code=$3
+    log_error "Internal error at line ${line} (command: \"${cmd}\", exit code: ${code})"
+}
+
+trap 'on_error "$LINENO" "$BASH_COMMAND" "$?"' ERR
+
 cleanup() {
     local exit_code=$?
-    trap - EXIT INT TERM HUP # Prevent recursive trap calls
+    trap - EXIT INT TERM HUP ERR # Prevent recursive trap calls
 
     # Terminate running scrcpy process immediately if active
     if [ -n "${SCRCPY_PID:-}" ] && kill -0 "$SCRCPY_PID" 2>/dev/null; then
@@ -439,7 +448,7 @@ profile_device() {
     log_step "Connecting to POCO Device and Profiling Hardware"
 
     # Start adb server
-    adb start-server >/dev/null 2>&1
+    adb start-server >/dev/null 2>&1 || true
 
     log_info "Waiting for device via USB (ensure USB Debugging is ON)..."
     local timeout=25

@@ -228,6 +228,8 @@ class MainWindow(Adw.ApplicationWindow):
     def on_action_clicked(self, _button):
         if self.session_manager.is_running():
             # Stop session
+            self.btn_action.set_sensitive(False)
+            self.btn_action.set_label("⏳ Restaurando...")
             self._append_log("[INFO] Solicitando encerramento da sessão...\n")
             self.session_manager.stop_session(self._on_state_changed)
         else:
@@ -236,6 +238,11 @@ class MainWindow(Adw.ApplicationWindow):
                 self._show_toast("Nenhum celular POCO detectado. Conecte o cabo USB!")
                 self._append_log("[ERRO] Dispositivo não conectado ao tentar iniciar.\n")
                 return
+
+            # Debounce protection: disable button immediately to absorb double-clicks
+            self.btn_action.set_sensitive(False)
+            self.btn_action.set_label("⏳ Conectando...")
+            self.btn_reset.set_sensitive(False)
 
             # Prepare options
             mode_idx = self.combo_mode.get_selected()
@@ -266,12 +273,24 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
     def _on_state_changed(self, state: SessionState):
-        if state == SessionState.RUNNING:
+        if state == SessionState.STARTING:
+            self.btn_action.set_label("⏳ Conectando...")
+            self.btn_action.set_sensitive(False)
+            self.btn_reset.set_sensitive(False)
+        elif state == SessionState.RUNNING:
             self.btn_action.set_label("🛑 PARAR SESSÃO")
             self.btn_action.remove_css_class("suggested-action")
             self.btn_action.add_css_class("destructive-action")
             self.btn_reset.set_sensitive(False)
-            self._show_toast("🎮 Sessão de jogo iniciada com latência zero!")
+            self._show_toast("🎮 Sessão iniciada com sucesso!")
+
+            # 2.5s Grace period: prevent rapid accidental clicking from immediately terminating
+            def enable_stop_btn():
+                if self.session_manager.is_running():
+                    self.btn_action.set_sensitive(True)
+                return False
+            GLib.timeout_add(2500, enable_stop_btn)
+
         elif state == SessionState.STOPPING:
             self.btn_action.set_label("⏳ Restaurando...")
             self.btn_action.set_sensitive(False)
