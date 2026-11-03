@@ -1,4 +1,4 @@
-"""Session Runner and Process Lifecycle Management."""
+"""OmniLink Mobile Engine - Session Runner and Process Lifecycle Management."""
 
 import enum
 import os
@@ -20,8 +20,8 @@ class SessionState(enum.Enum):
 
 @dataclass
 class SessionOptions:
-    mode: str = "max"  # max, eco, dex, virtual, otg
-    orientation: str = "landscape"  # auto, landscape, portrait
+    mode: str = "max"  # max, eco, dex, mirror, virtual, otg
+    orientation: str = "auto"  # auto, landscape, portrait
     lock_laptop: bool = True
     audio_route: str = "dual"  # dual, pc, off
     screen_off: bool = True
@@ -31,7 +31,7 @@ class SessionOptions:
 
 
 class SessionManager:
-    """Controls the background poco-gaming engine process with thread-safe callbacks."""
+    """Controls the background omnilink engine process with thread-safe callbacks."""
 
     def __init__(self, script_path: str):
         self.script_path = os.path.abspath(script_path)
@@ -50,7 +50,7 @@ class SessionManager:
         on_log: Callable[[str], None],
         on_state_change: Callable[[SessionState], None],
     ):
-        """Starts a new scrcpy/poco-gaming session."""
+        """Starts a new scrcpy/omnilink session."""
         with self._lock:
             if self.process is not None and self.process.poll() is None:
                 return
@@ -66,10 +66,12 @@ class SessionManager:
                 cmd.append("--eco")
             elif options.mode == "dex":
                 cmd.append("--dex")
+            elif options.mode == "mirror":
+                cmd.append("--mirror")
             elif options.mode == "virtual":
                 cmd.append("--virtual")
             elif options.mode == "otg":
-                cmd.append("--dock")
+                cmd.append("--otg")
 
             if options.orientation == "landscape":
                 cmd.append("--landscape")
@@ -126,7 +128,7 @@ class SessionManager:
                 with self._lock:
                     self.process = None
                     self._set_state(SessionState.IDLE, on_state_change)
-                GLib.idle_add(on_log, "[INFO] Sessão finalizada e display restaurado.\n")
+                GLib.idle_add(on_log, "[INFO] Sessão finalizada e estado do sistema restaurado.\n")
 
         self._reader_thread = threading.Thread(target=reader, daemon=True)
         self._reader_thread.start()
@@ -155,12 +157,12 @@ class SessionManager:
         on_log: Callable[[str], None],
         on_complete: Callable[[bool], None],
     ):
-        """Runs the emergency reset routine asynchronously."""
+        """Runs the emergency hardware reset routine asynchronously."""
         def worker():
             cmd = [self.script_path, "--reset"]
             success = False
             try:
-                GLib.idle_add(on_log, "\n[INFO] Executando rotina de restauração dos padrões...\n")
+                GLib.idle_add(on_log, "\n[INFO] Executando rotina de restauração dos padrões de fábrica...\n")
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -182,17 +184,17 @@ class SessionManager:
         t = threading.Thread(target=worker, daemon=True)
         t.start()
 
-    def run_auto_install_task(
+    def run_reset_launcher_task(
         self,
         on_log: Callable[[str], None],
         on_complete: Callable[[bool], None],
     ):
-        """Runs the system auto-installer asynchronously."""
+        """Runs the home screen launcher reload routine asynchronously."""
         def worker():
-            cmd = [self.script_path, "-y", "--install"]
+            cmd = [self.script_path, "--reset-launcher"]
             success = False
             try:
-                GLib.idle_add(on_log, "\n[INFO] Configurando dependências do sistema...\n")
+                GLib.idle_add(on_log, "\n[INFO] Restaurando layout e posições dos ícones da tela inicial...\n")
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -207,7 +209,7 @@ class SessionManager:
                 proc.wait()
                 success = proc.returncode == 0
             except Exception as e:
-                GLib.idle_add(on_log, f"[ERRO] Falha no instalador: {e}\n")
+                GLib.idle_add(on_log, f"[ERRO] Falha ao recarregar launcher: {e}\n")
             finally:
                 GLib.idle_add(on_complete, success)
 

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=OmniLink Mobile Engine
+GenericName=Universal Android Gaming & Desktop Suite
+Comment=Play mobile games and run Android desktop at ultra-low latency with native controller support
+Exec=/home/nepo/.gemini/antigravity/scratch/poco-game-engine/omnilink-gui
+Path=/home/nepo/.gemini/antigravity/scratch/poco-game-engine
+Icon=/home/nepo/.gemini/antigravity/scratch/poco-game-engine/assets/omnilink.svg
+Terminal=false
+Categories=Game;Utility;HardwareSettings;
+Keywords=android;scrcpy;omnilink;gaming;dex;display;latency;kvm;mirror;
+StartupNotify=true
+StartupWMClass=com.omnilink.engine

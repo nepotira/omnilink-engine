@@ -1,4 +1,4 @@
-"""UI Custom Widgets and Styling Components."""
+"""OmniLink Mobile Engine - UI Custom Widgets and Styling Components."""
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -42,21 +42,21 @@ CUSTOM_CSS = b"""
 }
 
 .metric-title {
-    font-size: 12px;
+    font-size: 11px;
     color: @secondary_color;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .metric-value {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
 }
 
 .log-view {
     font-family: monospace;
     font-size: 11px;
-    background-color: #1e1e1e;
-    color: #e0e0e0;
+    background-color: #1a1b26;
+    color: #c0caf5;
     border-radius: 8px;
     padding: 8px;
 }
@@ -81,20 +81,20 @@ def load_application_css():
 
 
 class DeviceTelemetryCard(Gtk.Box):
-    """Visual card displaying live battery, refresh rate, and resolution telemetry."""
+    """Visual card displaying live universal hardware telemetry and connection status."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.add_css_class("card-telemetry")
 
-        # Top line: Device name & Status badge
+        # Top line: Device Brand/Model & Status badge
         top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         
         icon = Gtk.Image.new_from_icon_name("phone-symbolic")
         icon.set_pixel_size(24)
         top_box.append(icon)
 
-        self.lbl_device_title = Gtk.Label(label="Procurando dispositivo POCO...", xalign=0)
+        self.lbl_device_title = Gtk.Label(label="Procurando dispositivo Android...", xalign=0)
         self.lbl_device_title.set_hexpand(True)
         self.lbl_device_title.add_css_class("metric-value")
         top_box.append(self.lbl_device_title)
@@ -110,11 +110,11 @@ class DeviceTelemetryCard(Gtk.Box):
 
         # Grid of metrics
         grid = Gtk.Grid()
-        grid.set_column_spacing(24)
+        grid.set_column_spacing(20)
         grid.set_row_spacing(6)
         grid.set_hexpand(True)
 
-        # Row 0: Bateria & Temp
+        # Row 0 Col 0: Bateria & Temp
         lbl_bat_title = Gtk.Label(label="Bateria & Térmica", xalign=0)
         lbl_bat_title.add_css_class("metric-title")
         grid.attach(lbl_bat_title, 0, 0, 1, 1)
@@ -123,7 +123,7 @@ class DeviceTelemetryCard(Gtk.Box):
         self.lbl_bat_val.add_css_class("metric-value")
         grid.attach(self.lbl_bat_val, 0, 1, 1, 1)
 
-        # Row 0 Col 1: Taxa de Hz
+        # Row 0 Col 1: Taxa de Hz & VSYNC
         lbl_hz_title = Gtk.Label(label="Taxa de Atualização", xalign=0)
         lbl_hz_title.add_css_class("metric-title")
         grid.attach(lbl_hz_title, 1, 0, 1, 1)
@@ -132,8 +132,8 @@ class DeviceTelemetryCard(Gtk.Box):
         self.lbl_hz_val.add_css_class("metric-value")
         grid.attach(self.lbl_hz_val, 1, 1, 1, 1)
 
-        # Row 0 Col 2: Tela do Host & Resolução
-        lbl_host_title = Gtk.Label(label="Resolução & Proporção", xalign=0)
+        # Row 0 Col 2: Tela do Computador & GPU
+        lbl_host_title = Gtk.Label(label="Tela Host & GPU", xalign=0)
         lbl_host_title.add_css_class("metric-title")
         grid.attach(lbl_host_title, 2, 0, 1, 1)
 
@@ -146,7 +146,8 @@ class DeviceTelemetryCard(Gtk.Box):
     def update_data(self, device_info, host_info):
         """Updates the card contents with fresh telemetry."""
         if device_info.is_connected:
-            self.lbl_device_title.set_label(f"POCO / {device_info.model} [{device_info.soc}]")
+            brand_str = f"{device_info.brand} {device_info.model}"
+            self.lbl_device_title.set_label(f"📱 {brand_str} [{device_info.soc}]")
             self.badge_status.set_label("CONECTADO")
             self.badge_status.remove_css_class("status-badge-err")
             self.badge_status.add_css_class("status-badge-ok")
@@ -154,12 +155,12 @@ class DeviceTelemetryCard(Gtk.Box):
             charging_str = " ⚡" if device_info.is_charging else ""
             self.lbl_bat_val.set_label(f"{device_info.battery_level}%{charging_str} ({device_info.battery_temp_c:.1f}°C)")
 
-            sync_status = " (Sync 60Hz)" if host_info.refresh_rate_hz == 60 else ""
+            sync_status = " (Sync)" if host_info.refresh_rate_hz == device_info.refresh_rate_hz else ""
             self.lbl_hz_val.set_label(f"{device_info.refresh_rate_hz} Hz{sync_status}")
 
             self.lbl_host_val.set_label(f"{host_info.resolution} ({host_info.aspect_ratio})")
         else:
-            self.lbl_device_title.set_label("Nenhum dispositivo POCO conectado")
+            self.lbl_device_title.set_label("Nenhum aparelho Android conectado via USB")
             self.badge_status.set_label("DESCONECTADO")
             self.badge_status.remove_css_class("status-badge-ok")
             self.badge_status.add_css_class("status-badge-err")

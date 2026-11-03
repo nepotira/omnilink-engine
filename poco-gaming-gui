@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# POCO Game Engine - Graphical Interface Launcher
+# OmniLink Mobile Engine - Graphical Interface Launcher
 # ==============================================================================
 
 set -euo pipefail

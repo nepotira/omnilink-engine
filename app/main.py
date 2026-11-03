@@ -1,4 +1,4 @@
-"""Main entrypoint for the POCO Game Engine Application."""
+"""OmniLink Mobile Engine - Main entrypoint."""
 
 import os
 import sys
@@ -11,12 +11,12 @@ from app.ui.widgets import load_application_css
 from app.ui.window import MainWindow
 
 
-class PocoGamingApp(Adw.Application):
-    """Adwaita Application instance."""
+class OmniLinkApp(Adw.Application):
+    """Adwaita Application instance for OmniLink Mobile Engine."""
 
     def __init__(self, script_path: str):
         super().__init__(
-            application_id="com.poco.gaming.engine",
+            application_id="com.omnilink.engine",
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
         self.script_path = script_path
@@ -30,11 +30,12 @@ class PocoGamingApp(Adw.Application):
 
 
 def main():
-    # Base directory
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    script_path = os.path.join(base_dir, "poco-gaming.sh")
+    script_path = os.path.join(base_dir, "omnilink.sh")
+    if not os.path.exists(script_path):
+        script_path = os.path.join(base_dir, "poco-gaming.sh")
 
-    app = PocoGamingApp(script_path)
+    app = OmniLinkApp(script_path)
     return app.run(sys.argv)
 
 

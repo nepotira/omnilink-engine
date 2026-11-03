@@ -1,11 +1,11 @@
-"""Main Application Window for POCO Game Engine."""
+"""OmniLink Mobile Engine - Main Application Window."""
 
 import os
 import threading
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib
 
 from app.backend.adb import ADBManager, DeviceInfo, HostDisplayInfo
 from app.backend.session import SessionManager, SessionOptions, SessionState
@@ -13,11 +13,11 @@ from app.ui.widgets import DeviceTelemetryCard
 
 
 class MainWindow(Adw.ApplicationWindow):
-    """Main Application Window with Libadwaita styling and real-time controls."""
+    """Main Application Window with Libadwaita styling and universal real-time controls."""
 
     def __init__(self, app, script_path: str):
-        super().__init__(application=app, title="POCO Zero-Latency Game Engine")
-        self.set_default_size(720, 780)
+        super().__init__(application=app, title="OmniLink Mobile Engine")
+        self.set_default_size(740, 820)
 
         self.session_manager = SessionManager(script_path)
         self.device_info = ADBManager.get_device_info()
@@ -35,8 +35,8 @@ class MainWindow(Adw.ApplicationWindow):
         # HeaderBar
         header = Adw.HeaderBar()
         title_widget = Adw.WindowTitle(
-            title="POCO Game Engine",
-            subtitle="Snapdragon 8 Elite Gaming Suite"
+            title="OmniLink Mobile Engine",
+            subtitle="Universal Ultra-Low Latency Android Gaming & Desktop Suite"
         )
         header.set_title_widget(title_widget)
         main_box.append(header)
@@ -58,16 +58,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         # 2. Execution Profiles
         group_modes = Adw.PreferencesGroup(
-            title="Perfil de Desempenho",
-            description="Escolha a resolução e o pipeline de aceleração gráfica"
+            title="Perfil de Operação e Desempenho",
+            description="Escolha a arquitetura de vídeo, janelas ou periféricos para a sessão"
         )
-        self.combo_mode = Adw.ComboRow(title="Modo de Operação")
+        self.combo_mode = Adw.ComboRow(title="Modo de Execução")
         mode_model = Gtk.StringList.new([
-            "🎮 Gamer Max (1920x1280 3:2 @ 16M - Ultra Imersivo)",
-            "⚡ Esports Eco (1280x854 3:2 @ 8M - Baixa Temperatura)",
-            "🖥️ Desktop / DeX (Janelas Flutuantes, Tela Nativa Intacta)",
-            "📱 Display Secundário (Tela Virtual Independente)",
-            "⌨️ Modo OTG Dock (KVM Teclado/Mouse sem Vídeo)"
+            "🎮 Gamer Max (Adaptação Fullscreen ao Host @ 16M HEVC)",
+            "⚡ Esports Eco (Resolução Otimizada @ 8M - Baixa Temperatura)",
+            "🖥️ Desktop / DeX (Janelas Flutuantes, Barra de Tarefas e Multitarefa)",
+            "📱 Espelhamento Simples (Nativo 1:1 Sem Alterar Resolução ou Ícones)",
+            "🖥️ Display Secundário Virtual (Área de Trabalho Independente)",
+            "⌨️ Modo KVM Hardware Dock (Teclado e Mouse Direto via USB HID)"
         ])
         self.combo_mode.set_model(mode_model)
         self.combo_mode.set_selected(0)
@@ -76,16 +77,24 @@ class MainWindow(Adw.ApplicationWindow):
 
         # 3. Hardware & Display Adjustments
         group_settings = Adw.PreferencesGroup(
-            title="Ajustes de Tela e Conforto",
-            description="Sincronização de rotação, sensores e áudio de baixa latência"
+            title="Controles Globais de Hardware e Tela",
+            description="Ajustes válidos para qualquer modo de espelhamento ou jogo"
         )
 
+        # Screen Power Control (Item 1)
+        self.switch_screen_off = Adw.SwitchRow(
+            title="Apagar Tela Física do Aparelho",
+            subtitle="Desliga o painel do celular durante a sessão para economia térmica (Alt+O alterna ao vivo)"
+        )
+        self.switch_screen_off.set_active(True)
+        group_settings.add(self.switch_screen_off)
+
         # Phone Rotation
-        self.combo_rotation = Adw.ComboRow(title="Orientação da Tela do Celular")
+        self.combo_rotation = Adw.ComboRow(title="Orientação da Tela do Aparelho")
         rot_model = Gtk.StringList.new([
-            "🔄 Forçar Paisagem (270° - Padrão p/ Games)",
-            "📱 Forçar Retrato (0°)",
-            "🌐 Automática / Livre"
+            "🌐 Automática / Livre (Recomendado)",
+            "🔄 Forçar Paisagem (270° - Ideal para Emuladores)",
+            "📱 Forçar Retrato (0°)"
         ])
         self.combo_rotation.set_model(rot_model)
         self.combo_rotation.set_selected(0)
@@ -94,7 +103,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Laptop Orientation Lock
         self.switch_laptop_lock = Adw.SwitchRow(
             title="Travar Rotação do Notebook Zorin",
-            subtitle="Evita que o sensor de toque e aceleração do laptop gire durante o jogo"
+            subtitle="Impede que o sensor de aceleração e touchscreen do laptop gire durante o uso"
         )
         self.switch_laptop_lock.set_active(True)
         group_settings.add(self.switch_laptop_lock)
@@ -110,20 +119,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.combo_audio.set_selected(0)
         group_settings.add(self.combo_audio)
 
-        # Thermal Screen Off
-        self.switch_screen_off = Adw.SwitchRow(
-            title="Economia Térmica (Apagar Tela Física)",
-            subtitle="Desliga o painel do POCO enquanto espelha, reduzindo calor e consumo"
-        )
-        self.switch_screen_off.set_active(True)
-        group_settings.add(self.switch_screen_off)
-
         page.add(group_settings)
 
         # 4. Diagnostic & Live Logs
         group_logs = Adw.PreferencesGroup(
             title="Terminal de Diagnósticos e Logs",
-            description="Acompanhamento em tempo real das mensagens do ADB e scrcpy"
+            description="Acompanhamento em tempo real das mensagens do ADB e aceleradores de hardware"
         )
         self.expander_logs = Adw.ExpanderRow(title="Visualizar Logs em Tempo Real")
         
@@ -158,17 +159,23 @@ class MainWindow(Adw.ApplicationWindow):
         page.add(group_logs)
 
         # 5. Bottom Action Bar
-        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         bottom_bar.set_margin_top(12)
         bottom_bar.set_margin_bottom(16)
-        bottom_bar.set_margin_start(24)
-        bottom_bar.set_margin_end(24)
+        bottom_bar.set_margin_start(20)
+        bottom_bar.set_margin_end(20)
 
-        # Emergency Reset Button
+        # Emergency Hardware Reset
         self.btn_reset = Gtk.Button(label="🔄 Restaurar Padrões")
-        self.btn_reset.set_tooltip_text("Restaura a resolução nativa, densidade, Hz, rotação e launcher do POCO")
+        self.btn_reset.set_tooltip_text("Restaura a resolução nativa, densidade, Hz, rotação e travas de sensor")
         self.btn_reset.connect("clicked", self.on_reset_clicked)
         bottom_bar.append(self.btn_reset)
+
+        # Quick Home Screen Layout Reload (Item 3)
+        self.btn_reload_launcher = Gtk.Button(label="🧩 Restaurar Ícones")
+        self.btn_reload_launcher.set_tooltip_text("Recarrega o launcher original do smartphone para recuperar o alinhamento da tela inicial")
+        self.btn_reload_launcher.connect("clicked", self.on_reload_launcher_clicked)
+        bottom_bar.append(self.btn_reload_launcher)
 
         # Spacer
         spacer = Gtk.Box()
@@ -176,7 +183,7 @@ class MainWindow(Adw.ApplicationWindow):
         bottom_bar.append(spacer)
 
         # Primary Launch/Stop Button
-        self.btn_action = Gtk.Button(label="🎮 INICIAR JOGO")
+        self.btn_action = Gtk.Button(label="🎮 INICIAR SESSÃO")
         self.btn_action.add_css_class("suggested-action")
         self.btn_action.add_css_class("pill")
         self.btn_action.add_css_class("action-btn-primary")
@@ -195,7 +202,6 @@ class MainWindow(Adw.ApplicationWindow):
     def _append_log(self, text: str):
         end_iter = self.log_buffer.get_end_iter()
         self.log_buffer.insert(end_iter, text)
-        # Auto scroll to bottom
         mark = self.log_buffer.create_mark(None, self.log_buffer.get_end_iter(), False)
         self.text_log.scroll_to_mark(mark, 0.05, False, 0.0, 1.0)
 
@@ -235,7 +241,7 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             # Check connection first
             if not self.device_info.is_connected:
-                self._show_toast("Nenhum celular POCO detectado. Conecte o cabo USB!")
+                self._show_toast("Nenhum aparelho Android detectado. Conecte o cabo USB!")
                 self._append_log("[ERRO] Dispositivo não conectado ao tentar iniciar.\n")
                 return
 
@@ -243,15 +249,16 @@ class MainWindow(Adw.ApplicationWindow):
             self.btn_action.set_sensitive(False)
             self.btn_action.set_label("⏳ Conectando...")
             self.btn_reset.set_sensitive(False)
+            self.btn_reload_launcher.set_sensitive(False)
 
             # Prepare options
             mode_idx = self.combo_mode.get_selected()
-            modes = ["max", "eco", "dex", "virtual", "otg"]
+            modes = ["max", "eco", "dex", "mirror", "virtual", "otg"]
             selected_mode = modes[mode_idx] if mode_idx < len(modes) else "max"
 
             rot_idx = self.combo_rotation.get_selected()
-            rotations = ["landscape", "portrait", "auto"]
-            selected_rot = rotations[rot_idx] if rot_idx < len(rotations) else "landscape"
+            rotations = ["auto", "landscape", "portrait"]
+            selected_rot = rotations[rot_idx] if rot_idx < len(rotations) else "auto"
 
             audio_idx = self.combo_audio.get_selected()
             audios = ["dual", "pc", "off"]
@@ -277,12 +284,14 @@ class MainWindow(Adw.ApplicationWindow):
             self.btn_action.set_label("⏳ Conectando...")
             self.btn_action.set_sensitive(False)
             self.btn_reset.set_sensitive(False)
+            self.btn_reload_launcher.set_sensitive(False)
         elif state == SessionState.RUNNING:
             self.btn_action.set_label("🛑 PARAR SESSÃO")
             self.btn_action.remove_css_class("suggested-action")
             self.btn_action.add_css_class("destructive-action")
             self.btn_reset.set_sensitive(False)
-            self._show_toast("🎮 Sessão iniciada com sucesso!")
+            self.btn_reload_launcher.set_sensitive(False)
+            self._show_toast("🎮 Sessão iniciada com latência zero!")
 
             # 2.5s Grace period: prevent rapid accidental clicking from immediately terminating
             def enable_stop_btn():
@@ -295,33 +304,51 @@ class MainWindow(Adw.ApplicationWindow):
             self.btn_action.set_label("⏳ Restaurando...")
             self.btn_action.set_sensitive(False)
         elif state == SessionState.IDLE:
-            self.btn_action.set_label("🎮 INICIAR JOGO")
+            self.btn_action.set_label("🎮 INICIAR SESSÃO")
             self.btn_action.set_sensitive(True)
             self.btn_action.remove_css_class("destructive-action")
             self.btn_action.add_css_class("suggested-action")
             self.btn_reset.set_sensitive(True)
+            self.btn_reload_launcher.set_sensitive(True)
             self._show_toast("Dispositivo e tela restaurados com sucesso.")
         elif state == SessionState.ERROR:
-            self.btn_action.set_label("🎮 INICIAR JOGO")
+            self.btn_action.set_label("🎮 INICIAR SESSÃO")
             self.btn_action.set_sensitive(True)
             self.btn_action.remove_css_class("destructive-action")
             self.btn_action.add_css_class("suggested-action")
             self.btn_reset.set_sensitive(True)
+            self.btn_reload_launcher.set_sensitive(True)
             self._show_toast("Erro durante a execução. Verifique os logs.")
 
     def on_reset_clicked(self, _button):
         self.btn_reset.set_sensitive(False)
-        self._show_toast("Executando restauração dos padrões...")
+        self._show_toast("Executando restauração dos padrões de fábrica...")
         
         def on_done(success: bool):
             self.btn_reset.set_sensitive(True)
             if success:
-                self._show_toast("✅ Padrões originais do POCO restaurados!")
+                self._show_toast("✅ Padrões originais restaurados!")
             else:
                 self._show_toast("⚠️ Restauração concluída com avisos.")
             self._poll_telemetry_loop()
 
         self.session_manager.run_reset_task(
+            on_log=self._append_log,
+            on_complete=on_done,
+        )
+
+    def on_reload_launcher_clicked(self, _button):
+        self.btn_reload_launcher.set_sensitive(False)
+        self._show_toast("Recarregando layout da tela de início...")
+
+        def on_done(success: bool):
+            self.btn_reload_launcher.set_sensitive(True)
+            if success:
+                self._show_toast("✅ Layout dos ícones da tela de início restaurado!")
+            else:
+                self._show_toast("⚠️ Não foi possível forçar a recarga do launcher.")
+
+        self.session_manager.run_reset_launcher_task(
             on_log=self._append_log,
             on_complete=on_done,
         )

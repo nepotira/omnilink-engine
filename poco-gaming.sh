@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# POCO Zero-Latency Game Engine (scrcpy)
-# Target: Any Linux (Optimized for Zorin OS / Ubuntu / Wayland / Intel UHD)
-# Author: Antigravity (Advanced Agentic Coding)
+# OmniLink Mobile Engine (scrcpy)
+# Universal Ultra-Low Latency Android Gaming & Desktop Suite
+# Compatible with: Any Android Device & Any Linux Workstation (Wayland & X11)
 # ==============================================================================
 
 set -eo pipefail
@@ -10,8 +10,8 @@ set -eo pipefail
 # ------------------------------------------------------------------------------
 # Global Variables and Defaults
 # ------------------------------------------------------------------------------
-APP_NAME="POCO Zero-Latency Game Engine"
-VERSION="1.0.0"
+APP_NAME="OmniLink Mobile Engine"
+VERSION="2.0.0"
 
 # Silence Snap launcher popups and confinement notices
 export SNAP_LAUNCHER_NOTICE_ENABLED="false"
@@ -43,12 +43,15 @@ TARGET_FPS=60
 MAX_SIZE=1920
 
 # Performance & Codec Defaults
-PERF_PROFILE="max" # max (1080p), eco (720p)
+PERF_PROFILE="max" # max (1080p), eco (720p), mirror
 VIDEO_CODEC="h265"
 VIDEO_BITRATE="16M"
 FORCE_ADB_FORWARD=1
 CHOSEN_ENCODER=""
 DISABLE_AUDIO=0
+AUDIO_DUP=1
+TURN_SCREEN_OFF=1
+STAY_AWAKE=1
 
 # Orientation Controls
 REQUESTED_ROTATION="" # 0, 90, 180, 270
@@ -56,7 +59,12 @@ ROTATION_NUM=3
 LOCK_LAPTOP_ROTATION=0
 ORIG_LAPTOP_LOCK=""
 
-# Device Original Backups
+# Device Telemetry & Identification
+DEVICE_SERIAL=""
+DEVICE_BRAND="Android"
+DEVICE_MODEL="Device"
+DEVICE_MANUFACTURER=""
+DEVICE_SOC="Generic"
 DEVICE_ORIG_SIZE=""
 DEVICE_ORIG_DENSITY=""
 DEVICE_ORIG_PEAK_REFRESH=""
@@ -67,9 +75,10 @@ DEVICE_ORIG_ACCEL_ROTATION=""
 DEVICE_ORIG_USER_ROTATION=""
 ORIG_FREEFORM=""
 ORIG_RESIZABLE=""
+DEX_LAUNCHER_ACTIVE=""
 
 AUTO_INSTALL=0
-RUN_MODE="normal" # normal, eco, dex, virtual, otg, daemon, reset, check
+RUN_MODE="normal" # normal, eco, dex, mirror, virtual, otg, daemon, reset, check, reset-launcher
 
 # Optional Configuration File Override
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,9 +97,6 @@ log_warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET} $*"; }
 log_error()   { echo -e "${C_RED}[ERROR]${C_RESET} $*"; }
 log_step()    { echo -e "\n${C_BOLD}${C_BLUE}==>${C_RESET} ${C_BOLD}$*${C_RESET}"; }
 
-# ------------------------------------------------------------------------------
-# Fail-Safe Cleanup Handler (POSIX Trap)
-# ------------------------------------------------------------------------------
 on_error() {
     local line=$1
     local cmd=$2
@@ -100,6 +106,9 @@ on_error() {
 
 trap 'on_error "$LINENO" "$BASH_COMMAND" "$?"' ERR
 
+# ------------------------------------------------------------------------------
+# Fail-Safe Cleanup Handler (POSIX Trap)
+# ------------------------------------------------------------------------------
 cleanup() {
     local exit_code=$?
     trap - EXIT INT TERM HUP ERR # Prevent recursive trap calls
@@ -116,164 +125,55 @@ cleanup() {
         kill -KILL "$SCRCPY_PID" 2>/dev/null || true
     fi
 
-    # Kill any lingering scrcpy instances
-    killall -q -9 scrcpy 2>/dev/null || true
+    # Terminate any lingering scrcpy sessions
+    pkill -f "scrcpy -d" 2>/dev/null || true
 
-    # 1. Restore Zorin OS laptop orientation lock if modified
-    if [ "$LAPTOP_LOCK_MODIFIED" -eq 1 ]; then
-        restore_laptop_rotation || true
-    fi
+    # Execute State Restorations in reverse order
+    restore_laptop_rotation
+    restore_dex_mode
+    restore_device_orientation
+    restore_device_refresh_rate
+    restore_screen_resolution
 
-    # 2. Restore Android Freeform / DeX global settings
-    if [ "$DEX_MODE_ACTIVE" -eq 1 ]; then
-        restore_dex_mode || true
+    if [ "$exit_code" -ne 0 ]; then
+        log_warn "Session ended with return code ${exit_code}."
     fi
-
-    # 3. Restore POCO screen orientation and accelerometer
-    if [ "$ROTATION_MODIFIED" -eq 1 ]; then
-        restore_device_orientation || true
-    fi
-
-    # 4. Restore POCO native refresh rate
-    if [ "$REFRESH_MODIFIED" -eq 1 ]; then
-        echo ""
-        log_warn "Restoring POCO native refresh rate..."
-        restore_device_refresh_rate || true
-    fi
-
-    # 5. Restore POCO native resolution and density
-    if [ "$DISPLAY_MODIFIED" -eq 1 ]; then
-        echo ""
-        log_warn "Restoring POCO native display resolution and density..."
-        restore_screen_resolution || true
-    fi
-    exit $exit_code
 }
 
 trap cleanup EXIT INT TERM HUP
 
 # ------------------------------------------------------------------------------
-# Module 1: Dependency Verification & Automated Zero-Setup Provisioner
+# Module 1: Universal Dependency and System Verifier
 # ------------------------------------------------------------------------------
-install_missing_dependencies() {
-    local distro_id="$1"
-    local needs_adb="$2"
-    local needs_scrcpy="$3"
-    local needs_udev="$4"
-    local needs_vaapi="$5"
-
-    log_step "Auto-Configuring System (Zero to Function Installer)"
-    log_info "Elevating privileges to install missing packages and configure udev..."
-    sudo -v || { log_error "Failed to acquire sudo privileges."; exit 1; }
-
-    # 1. Distro Package Installation
-    case "$distro_id" in
-        ubuntu|debian|zorin|linuxmint|pop)
-            local apt_pkgs=()
-            [ "$needs_adb" -eq 1 ] && apt_pkgs+=("android-tools-adb")
-            [ "$needs_vaapi" -eq 1 ] && apt_pkgs+=("intel-media-va-driver-non-free" "vainfo")
-
-            if [ "${#apt_pkgs[@]}" -gt 0 ]; then
-                log_info "Installing distro packages: ${apt_pkgs[*]}"
-                sudo apt-get update -y
-                sudo apt-get install -y "${apt_pkgs[@]}" || sudo apt-get install -y intel-media-va-driver "${apt_pkgs[@]}" || true
-            fi
-
-            if [ "$needs_scrcpy" -eq 1 ]; then
-                log_info "Installing modern scrcpy (v3+/v5+) via Snap..."
-                if ! command -v snap >/dev/null 2>&1; then
-                    sudo apt-get update -y && sudo apt-get install -y snapd
-                fi
-                sudo snap install scrcpy --quiet
-            fi
-            ;;
-        fedora)
-            local dnf_pkgs=()
-            [ "$needs_adb" -eq 1 ] && dnf_pkgs+=("android-tools")
-            [ "$needs_scrcpy" -eq 1 ] && dnf_pkgs+=("scrcpy")
-            [ "$needs_vaapi" -eq 1 ] && dnf_pkgs+=("libva-intel-media-driver")
-            if [ "${#dnf_pkgs[@]}" -gt 0 ]; then
-                log_info "Installing via dnf: ${dnf_pkgs[*]}"
-                sudo dnf install -y "${dnf_pkgs[@]}"
-            fi
-            ;;
-        arch|manjaro)
-            local pac_pkgs=()
-            [ "$needs_adb" -eq 1 ] && pac_pkgs+=("android-tools")
-            [ "$needs_scrcpy" -eq 1 ] && pac_pkgs+=("scrcpy")
-            [ "$needs_vaapi" -eq 1 ] && pac_pkgs+=("intel-media-driver")
-            if [ "${#pac_pkgs[@]}" -gt 0 ]; then
-                log_info "Installing via pacman: ${pac_pkgs[*]}"
-                sudo pacman -S --needed --noconfirm "${pac_pkgs[@]}"
-            fi
-            ;;
-        *)
-            log_warn "Generic distro detected. Attempting snap install scrcpy..."
-            if command -v snap >/dev/null 2>&1; then
-                sudo snap install scrcpy --quiet
-            else
-                log_error "Please install adb and modern scrcpy (>= 2.0) manually on this distribution."
-                exit 1
-            fi
-            ;;
-    esac
-
-    # 2. Connect Snap Confinement Plugs (raw-usb, joystick)
-    if command -v snap >/dev/null 2>&1 && snap list scrcpy >/dev/null 2>&1; then
-        log_info "Configuring scrcpy snap security confinement plugs (raw-usb, joystick)..."
-        sudo snap connect scrcpy:raw-usb || true
-        sudo snap connect scrcpy:joystick || true
-        log_success "Snap plugs (raw-usb, joystick) connected successfully."
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        OS_ID="${ID:-unknown}"
+        OS_LIKE="${ID_LIKE:-$OS_ID}"
+    else
+        OS_ID="unknown"
+        OS_LIKE="unknown"
     fi
-
-    # 3. Configure POCO/Xiaomi Udev Rules
-    if [ "$needs_udev" -eq 1 ]; then
-        log_info "Configuring Xiaomi/POCO USB permissions (Vendor ID 2717)..."
-        local udev_file="/etc/udev/rules.d/51-android.rules"
-        sudo mkdir -p /etc/udev/rules.d
-        echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0666", GROUP="plugdev", TAG+="uaccess"' | sudo tee -a "$udev_file" >/dev/null
-
-        # Ensure plugdev group exists and current user is added
-        if ! getent group plugdev >/dev/null 2>&1; then
-            sudo groupadd plugdev || true
-        fi
-        sudo usermod -aG plugdev "$USER" || true
-
-        log_info "Reloading udev subsystem rules..."
-        sudo udevadm control --reload-rules && sudo udevadm trigger || true
-        log_success "Udev rules configured successfully."
-    fi
-
-    log_success "All system requirements and dependencies are now ready!"
+    log_info "Detected OS: ${OS_ID} (${OS_LIKE})"
 }
 
 check_and_install_deps() {
     log_step "Checking System Environment and Dependencies"
+    detect_os
 
-    # Identify Linux Distribution
-    local distro_id="unknown"
-    local distro_like=""
-    if [ -f /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        distro_id=$(grep -E '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
-        distro_like=$(grep -E '^ID_LIKE=' /etc/os-release | cut -d'=' -f2 | tr -d '"' || true)
-    fi
-    log_info "Detected OS: ${distro_id} (${distro_like:-standalone})"
-
-    local missing_pkgs=()
-    local needs_adb=0
+    local missing_deps=()
     local needs_scrcpy_upgrade=0
 
-    # 1. Check ADB
+    # 1. ADB Check
     if ! command -v adb >/dev/null 2>&1; then
-        missing_pkgs+=("adb")
-        needs_adb=1
+        missing_deps+=("adb")
+        log_warn "adb is not installed."
     else
         log_success "ADB found: $(command -v adb)"
     fi
 
-    # 2. Check scrcpy version and snap confinement plugs
-    local needs_snap_plugs=0
+    # 2. scrcpy Version Check
     if ! command -v scrcpy >/dev/null 2>&1; then
         needs_scrcpy_upgrade=1
         log_warn "scrcpy is not installed."
@@ -284,7 +184,7 @@ check_and_install_deps() {
         local major_ver
         major_ver=$(echo "$scrcpy_ver" | cut -d'.' -f1)
         if [ "$major_ver" -lt 2 ]; then
-            log_warn "Installed scrcpy version ($scrcpy_ver) is outdated (< 2.0). Modern codecs and audio require v2.0+."
+            log_warn "Installed scrcpy version ($scrcpy_ver) is outdated (< 2.0). Modern codecs require v2.0+."
             needs_scrcpy_upgrade=1
         else
             log_success "scrcpy version is up-to-date: ${scrcpy_ver}"
@@ -295,145 +195,178 @@ check_and_install_deps() {
             local snap_conns
             snap_conns=$(snap connections scrcpy 2>/dev/null || true)
             if echo "$snap_conns" | grep -qE '^joystick\s+scrcpy:joystick\s+-'; then
-                needs_snap_plugs=1
                 log_warn "scrcpy joystick plug not connected (required for Gamepad mode)."
-            fi
-            if echo "$snap_conns" | grep -qE '^raw-usb\s+scrcpy:raw-usb\s+-'; then
-                needs_snap_plugs=1
-                log_warn "scrcpy raw-usb plug not connected (required for low-latency USB)."
-            fi
-            if [ "$needs_snap_plugs" -eq 0 ]; then
+                needs_scrcpy_upgrade=1
+            elif echo "$snap_conns" | grep -qE '^raw-usb\s+scrcpy:raw-usb\s+-'; then
+                log_warn "scrcpy raw-usb plug not connected (required for low-latency direct USB)."
+                needs_scrcpy_upgrade=1
+            else
                 log_success "scrcpy snap security plugs (raw-usb, joystick) verified."
             fi
         fi
     fi
 
-    # 3. Check Xiaomi / POCO Udev Rules (Vendor ID 2717)
-    local udev_file="/etc/udev/rules.d/51-android.rules"
+    # 3. Android udev Rules Check
+    local udev_rule="/etc/udev/rules.d/51-android.rules"
     local needs_udev=0
-    if [ ! -f "$udev_file" ] || ! grep -q "2717" "$udev_file" 2>/dev/null; then
+    if [ ! -f "$udev_rule" ]; then
         needs_udev=1
-        log_warn "Xiaomi/POCO udev rules missing in ${udev_file}."
+        log_warn "Android udev rules missing in ${udev_rule}."
     else
-        log_success "Android udev rules verified (Vendor ID 2717)."
+        log_success "Android udev rules verified."
     fi
 
-    # 4. Check VA-API hardware decoding driver for Intel
-    local needs_vaapi=0
-    if lspci 2>/dev/null | grep -qi 'Intel.*Graphics'; then
-        if [ ! -f /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so ] && [ ! -f /usr/lib64/dri/iHD_drv_video.so ]; then
-            needs_vaapi=1
-            log_warn "Intel VA-API driver (intel-media-va-driver) recommended for hardware video decoding."
+    # 4. Hardware Decoders Check on Host
+    if command -v vainfo >/dev/null 2>&1; then
+        if vainfo 2>&1 | grep -qi "VAProfileHEVC"; then
+            log_success "Hardware VA-API HEVC decoder verified on host GPU."
         else
-            log_success "Intel VA-API driver found."
+            log_info "VA-API available; verifying driver profile..."
         fi
     fi
 
-    # Summary and Automated Resolution
-    if [ "$needs_adb" -eq 1 ] || [ "$needs_scrcpy_upgrade" -eq 1 ] || [ "$needs_snap_plugs" -eq 1 ] || [ "$needs_udev" -eq 1 ] || [ "$needs_vaapi" -eq 1 ]; then
-        if [ "$RUN_MODE" = "check" ]; then
-            echo ""
-            log_warn "Environment setup is incomplete. Run without --check or with -y to auto-configure."
-            return 0
+    if [ ${#missing_deps[@]} -eq 0 ] && [ "$needs_scrcpy_upgrade" -eq 0 ] && [ "$needs_udev" -eq 0 ]; then
+        log_success "All system requirements and dependencies are already satisfied."
+        return 0
+    fi
+
+    if [ "$RUN_MODE" = "check" ]; then
+        log_warn "Environment setup is incomplete. Run with -y to auto-configure."
+        return 0
+    fi
+
+    echo ""
+    log_warn "Missing components detected. Auto-configuring system..."
+
+    local do_install=0
+    if [ "$AUTO_INSTALL" -eq 1 ]; then
+        do_install=1
+    else
+        read -r -p "Do you want OmniLink to auto-configure this machine now? [Y/n] " yn
+        case "${yn:-Y}" in
+            [Yy]* ) do_install=1 ;;
+            * )
+                log_error "Installation cancelled. Required dependencies are missing."
+                exit 1
+                ;;
+        esac
+    fi
+
+    if [ "$do_install" -eq 1 ]; then
+        log_step "Auto-Configuring System (Zero-to-Function Installer)"
+        log_info "Elevating privileges to install missing packages and configure udev..."
+
+        if [ "$needs_udev" -eq 1 ]; then
+            log_info "Configuring universal Android USB udev permissions..."
+            cat << 'EOF' | sudo tee "$udev_rule" >/dev/null
+# Universal Android USB Rules (Xiaomi, Samsung, Google, Motorola, OnePlus, Asus)
+SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", MODE="0666", GROUP="plugdev"
+EOF
+            sudo udevadm control --reload-rules || true
+            sudo udevadm trigger || true
+            log_success "Universal udev rules configured successfully."
         fi
 
-        echo ""
-        log_warn "Fresh environment detected: missing components need to be installed to achieve 'Zero to Function'."
-        
-        local do_install=0
-        if [ "$AUTO_INSTALL" -eq 1 ]; then
-            do_install=1
-        else
-            read -r -p "Do you want poco-gaming to auto-configure this machine now? [Y/n] " yn
-            case "${yn:-Y}" in
-                [Yy]* ) do_install=1 ;;
-                * ) log_warn "Skipping auto-installation. Will attempt to run with current environment..." ;;
+        if [ ${#missing_deps[@]} -gt 0 ] || [ "$needs_scrcpy_upgrade" -eq 1 ]; then
+            case "$OS_LIKE" in
+                *debian*|*ubuntu*)
+                    sudo apt update -y
+                    [ ${#missing_deps[@]} -gt 0 ] && sudo apt install -y "${missing_deps[@]}"
+                    if [ "$needs_scrcpy_upgrade" -eq 1 ]; then
+                        if command -v snap >/dev/null 2>&1; then
+                            sudo snap install scrcpy --classic 2>/dev/null || sudo snap refresh scrcpy
+                            sudo snap connect scrcpy:raw-usb 2>/dev/null || true
+                            sudo snap connect scrcpy:joystick 2>/dev/null || true
+                        fi
+                    fi
+                    ;;
+                *fedora*|*rhel*)
+                    sudo dnf install -y adb scrcpy
+                    ;;
+                *arch*)
+                    sudo pacman -Sy --noconfirm android-tools scrcpy
+                    ;;
             esac
         fi
-
-        if [ "$do_install" -eq 1 ]; then
-            install_missing_dependencies "$distro_id" "$needs_adb" "$needs_scrcpy_upgrade" "$needs_udev" "$needs_vaapi"
-        fi
-    else
-        log_success "All system requirements and dependencies are already satisfied."
+        log_success "All system requirements and dependencies are now ready!"
     fi
 }
 
 # ------------------------------------------------------------------------------
-# Module 2: Host Display Resolution and Aspect Ratio Sensor
+# Module 2: Host Display Geometry & Refresh Rate Detection
 # ------------------------------------------------------------------------------
 detect_host_display() {
     log_step "Detecting Host Display Resolution and Aspect Ratio"
 
     local detected_res=""
+    local detected_hz=60
 
-    if [ -n "${CUSTOM_HOST_W:-}" ] && [ -n "${CUSTOM_HOST_H:-}" ]; then
-        detected_res="${CUSTOM_HOST_W}x${CUSTOM_HOST_H}"
-        log_info "Using custom resolution override from config.env: ${detected_res}"
+    # 1. DRM Kernel sysfs detection
+    for mode_file in /sys/class/drm/card*-eDP-*/modes /sys/class/drm/card*-HDMI-*/modes /sys/class/drm/card*-DP-*/modes; do
+        if [ -f "$mode_file" ]; then
+            detected_res=$(head -n1 "$mode_file" 2>/dev/null | tr -d '\r\n')
+            if [ -n "$detected_res" ] && [[ "$detected_res" =~ ^[0-9]+x[0-9]+$ ]]; then
+                log_info "Resolution detected from DRM kernel sysfs (${mode_file}): ${detected_res}"
+                break
+            fi
+        fi
+    done
+
+    # 2. Wayland / Zorin OS / GNOME Display Query Fallback
+    if [ -z "$detected_res" ] && command -v gnome-monitor-config >/dev/null 2>&1; then
+        detected_res=$(gnome-monitor-config list 2>/dev/null | grep -E "MODE:" | head -n1 | awk '{print $2}' || true)
     fi
 
-    # Method 1: Read directly from /sys/class/drm (Wayland/X11 agnostic)
-    if [ -z "$detected_res" ]; then
-        for mode_file in /sys/class/drm/card*-eDP-*/modes /sys/class/drm/card*-*/modes; do
-            if [ -f "$mode_file" ]; then
-                detected_res=$(head -n1 "$mode_file" 2>/dev/null || true)
-                if [ -n "$detected_res" ]; then
-                    log_info "Resolution detected from DRM kernel sysfs ($mode_file): ${detected_res}"
+    # 3. xrandr Fallback
+    if [ -z "$detected_res" ] && command -v xrandr >/dev/null 2>&1; then
+        detected_res=$(xrandr --current 2>/dev/null | grep -E '\*' | head -n1 | awk '{print $1}' || true)
+    fi
+
+    if [ -n "$detected_res" ] && [[ "$detected_res" =~ ^[0-9]+x[0-9]+$ ]]; then
+        HOST_W=$(echo "$detected_res" | cut -d'x' -f1)
+        HOST_H=$(echo "$detected_res" | cut -d'x' -f2)
+    else
+        log_warn "Could not auto-detect display resolution. Defaulting to 1920x1280 (3:2)."
+        HOST_W=1920
+        HOST_H=1280
+    fi
+
+    # Detect Host Refresh Rate (Hz)
+    for connector_status in /sys/class/drm/card*-eDP-*/status; do
+        if [ -f "$connector_status" ] && grep -q "connected" "$connector_status" 2>/dev/null; then
+            local edid_file
+            edid_file="$(dirname "$connector_status")/edid"
+            if [ -f "$edid_file" ] && command -v edid-decode >/dev/null 2>&1; then
+                local edid_hz
+                edid_hz=$(edid-decode "$edid_file" 2>/dev/null | grep -E -o '[0-9]+\.[0-9]+ Hz' | head -n1 | cut -d'.' -f1 || true)
+                if [ -n "$edid_hz" ] && [ "$edid_hz" -gt 30 ]; then
+                    detected_hz="$edid_hz"
                     break
                 fi
             fi
-        done
-    fi
-
-    # Method 2: Fallback to xrandr
-    if [ -z "$detected_res" ] && command -v xrandr >/dev/null 2>&1; then
-        detected_res=$(xrandr --current 2>/dev/null | grep -E '\*' | head -n1 | awk '{print $1}' || true)
-        if [ -n "$detected_res" ]; then
-            log_info "Resolution detected from xrandr: ${detected_res}"
         fi
-    fi
+    done
 
-    # Method 3: Fallback default (Zorin / Surface / Jinlon standard)
-    if [ -z "$detected_res" ]; then
-        detected_res="1920x1280"
-        log_warn "Could not auto-detect display. Using default profile: ${detected_res}"
-    fi
-
-    HOST_W=$(echo "$detected_res" | cut -d'x' -f1)
-    HOST_H=$(echo "$detected_res" | cut -d'x' -f2)
-
-    # Detect Host Display Refresh Rate (Hz)
-    local raw_hz=""
-    if command -v xrandr >/dev/null 2>&1; then
-        raw_hz=$(xrandr 2>/dev/null | grep -E '\*' | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1 || echo "")
-    fi
-
-    if [ -n "$raw_hz" ]; then
-        local int_hz
-        int_hz=$(echo "$raw_hz" | cut -d'.' -f1)
-        if [ "$int_hz" -ge 135 ]; then HOST_HZ=144
-        elif [ "$int_hz" -ge 110 ]; then HOST_HZ=120
-        elif [ "$int_hz" -ge 85 ]; then HOST_HZ=90
-        elif [ "$int_hz" -ge 55 ]; then HOST_HZ=60
-        else HOST_HZ="$int_hz"
-        fi
-        log_info "Host refresh rate detected: ${HOST_HZ} Hz (${raw_hz} Hz raw)"
-    else
-        HOST_HZ=60
-        log_info "Defaulting host refresh rate: 60 Hz"
-    fi
-
+    HOST_HZ="${detected_hz:-60}"
     TARGET_FPS="$HOST_HZ"
+    log_info "Host refresh rate detected: ${HOST_HZ} Hz"
 
-    # Calculate Aspect Ratio
-    if [ "$HOST_W" -eq 1920 ] && [ "$HOST_H" -eq 1280 ]; then
+    # Compute Aspect Ratio
+    local ratio_val
+    ratio_val=$(awk "BEGIN {printf \"%.2f\", ${HOST_W}/${HOST_H}}")
+    if [ "$ratio_val" = "1.50" ]; then
         HOST_RATIO="3:2"
-    elif [ "$HOST_W" -eq 1920 ] && [ "$HOST_H" -eq 1080 ]; then
+    elif [ "$ratio_val" = "1.78" ]; then
         HOST_RATIO="16:9"
-    elif [ "$HOST_W" -eq 2560 ] && [ "$HOST_H" -eq 1600 ]; then
+    elif [ "$ratio_val" = "1.60" ]; then
         HOST_RATIO="16:10"
-    elif [ "$HOST_W" -eq 2560 ] && [ "$HOST_H" -eq 1440 ]; then
-        HOST_RATIO="16:9"
+    elif [ "$ratio_val" = "2.33" ] || [ "$ratio_val" = "2.37" ]; then
+        HOST_RATIO="21:9"
     else
         HOST_RATIO="${HOST_W}:${HOST_H}"
     fi
@@ -442,12 +375,11 @@ detect_host_display() {
 }
 
 # ------------------------------------------------------------------------------
-# Module 3: POCO Device Profiler and Hardware Telemetry
+# Module 3: Universal Device Profiler and Hardware Telemetry
 # ------------------------------------------------------------------------------
 profile_device() {
-    log_step "Connecting to POCO Device and Profiling Hardware"
+    log_step "Connecting to Android Device and Profiling Hardware"
 
-    # Start adb server
     adb start-server >/dev/null 2>&1 || true
 
     log_info "Waiting for device via USB (ensure USB Debugging is ON)..."
@@ -460,37 +392,39 @@ profile_device() {
         if [ "$state" = "device" ]; then
             break
         elif [ "$state" = "unauthorized" ]; then
-            log_warn "Device detected but UNAUTHORIZED! Check your POCO screen and authorize USB debugging."
+            log_warn "Device detected but UNAUTHORIZED! Check your phone screen and authorize USB debugging."
         fi
 
         sleep 1
         count=$((count + 1))
         if [ "$count" -ge "$timeout" ]; then
             log_error "Connection timed out. No authorized Android device detected."
-            log_info "Troubleshooting checklist:"
-            echo "  1. Reconnect the USB-C cable."
-            echo "  2. Unlock POCO screen and accept the 'Allow USB debugging' prompt."
-            echo "  3. Xiaomi Settings -> Additional Settings -> Developer Options:"
-            echo "     - Enable 'USB debugging'"
-            echo "     - Enable 'USB debugging (Security settings)'"
             exit 1
         fi
     done
 
-    # Collect Device Telemetry
-    local dev_model dev_platform dev_soc dev_brand
-    dev_model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d '\r')
-    dev_brand=$(adb shell getprop ro.product.brand 2>/dev/null | tr -d '\r')
-    dev_platform=$(adb shell getprop ro.board.platform 2>/dev/null | tr -d '\r')
-    dev_soc=$(adb shell getprop ro.soc.model 2>/dev/null | tr -d '\r')
-    [ -z "$dev_soc" ] && dev_soc=$(adb shell getprop ro.hardware 2>/dev/null | tr -d '\r')
+    # Obtain exact Device Serial
+    DEVICE_SERIAL=$(adb get-serialno 2>/dev/null | tr -d '\r\n')
+    if [ -z "$DEVICE_SERIAL" ] || [ "$DEVICE_SERIAL" = "unknown" ]; then
+        DEVICE_SERIAL=$(adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}' | head -n1)
+    fi
 
-    log_success "Connected: ${dev_brand} ${dev_model} [SoC: ${dev_platform:-$dev_soc}]"
+    # Universal Device Properties
+    DEVICE_MODEL=$(adb -s "$DEVICE_SERIAL" shell getprop ro.product.model 2>/dev/null | tr -d '\r')
+    DEVICE_BRAND=$(adb -s "$DEVICE_SERIAL" shell getprop ro.product.brand 2>/dev/null | tr -d '\r')
+    DEVICE_MANUFACTURER=$(adb -s "$DEVICE_SERIAL" shell getprop ro.product.manufacturer 2>/dev/null | tr -d '\r')
+    local dev_platform dev_soc
+    dev_platform=$(adb -s "$DEVICE_SERIAL" shell getprop ro.board.platform 2>/dev/null | tr -d '\r')
+    dev_soc=$(adb -s "$DEVICE_SERIAL" shell getprop ro.soc.model 2>/dev/null | tr -d '\r')
+    [ -z "$dev_soc" ] && dev_soc=$(adb -s "$DEVICE_SERIAL" shell getprop ro.hardware 2>/dev/null | tr -d '\r')
+    DEVICE_SOC="${dev_soc:-$dev_platform}"
 
-    # Read physical resolution and density
+    log_success "Connected: ${DEVICE_MANUFACTURER} ${DEVICE_BRAND} ${DEVICE_MODEL} (Serial: ${DEVICE_SERIAL}) [SoC: ${DEVICE_SOC}]"
+
+    # Read native dimensions and density
     local wm_size_output wm_density_output
-    wm_size_output=$(adb shell wm size 2>/dev/null || true)
-    wm_density_output=$(adb shell wm density 2>/dev/null || true)
+    wm_size_output=$(adb -s "$DEVICE_SERIAL" shell wm size 2>/dev/null || true)
+    wm_density_output=$(adb -s "$DEVICE_SERIAL" shell wm density 2>/dev/null || true)
 
     DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | awk -F': ' '/Physical size/ {print $2}' | tr -d '\r')
     [ -z "$DEVICE_ORIG_SIZE" ] && DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | head -n1 | awk -F': ' '{print $2}' | tr -d '\r')
@@ -503,30 +437,33 @@ profile_device() {
     orig_h=$(echo "$DEVICE_ORIG_SIZE" | cut -d'x' -f2)
     if [ -n "$orig_h" ] && [ "$orig_h" -gt 0 ] && [ -n "$DEVICE_ORIG_DENSITY" ] && [ "$DEVICE_ORIG_DENSITY" -gt 0 ]; then
         TARGET_DENSITY=$(( (DEVICE_ORIG_DENSITY * HOST_H) / orig_h ))
-        [ "$TARGET_DENSITY" -lt 260 ] && TARGET_DENSITY=280
+        [ "$TARGET_DENSITY" -lt 240 ] && TARGET_DENSITY=280
         [ "$TARGET_DENSITY" -gt 440 ] && TARGET_DENSITY=340
     else
         TARGET_DENSITY=280
     fi
 
     # Read and Backup Original Phone Refresh Rate Configuration
-    DEVICE_ORIG_PEAK_REFRESH=$(adb shell settings get system peak_refresh_rate 2>/dev/null | tr -d '\r')
-    DEVICE_ORIG_MIN_REFRESH=$(adb shell settings get system min_refresh_rate 2>/dev/null | tr -d '\r')
-    DEVICE_ORIG_USER_REFRESH=$(adb shell settings get system user_refresh_rate 2>/dev/null | tr -d '\r')
-    DEVICE_ORIG_MIUI_REFRESH=$(adb shell settings get system miui_refresh_rate 2>/dev/null | tr -d '\r')
-    log_info "POCO original refresh rate detected: ${DEVICE_ORIG_PEAK_REFRESH:-120} Hz"
+    DEVICE_ORIG_PEAK_REFRESH=$(adb -s "$DEVICE_SERIAL" shell settings get system peak_refresh_rate 2>/dev/null | tr -d '\r')
+    DEVICE_ORIG_MIN_REFRESH=$(adb -s "$DEVICE_SERIAL" shell settings get system min_refresh_rate 2>/dev/null | tr -d '\r')
+    DEVICE_ORIG_USER_REFRESH=$(adb -s "$DEVICE_SERIAL" shell settings get system user_refresh_rate 2>/dev/null | tr -d '\r')
+    DEVICE_ORIG_MIUI_REFRESH=$(adb -s "$DEVICE_SERIAL" shell settings get system miui_refresh_rate 2>/dev/null | tr -d '\r')
+    log_info "Device native refresh rate detected: ${DEVICE_ORIG_PEAK_REFRESH:-60} Hz"
 
-    # Hardware Encoder Selection
+    # Universal Hardware Encoder Selection
     VIDEO_CODEC="h265"
     if command -v scrcpy >/dev/null 2>&1; then
         local encoders_list
-        encoders_list=$(SNAP_LAUNCHER_NOTICE_ENABLED="false" scrcpy --list-encoders 2>&1 || true)
+        encoders_list=$(SNAP_LAUNCHER_NOTICE_ENABLED="false" scrcpy -s "$DEVICE_SERIAL" --list-encoders 2>&1 || true)
         if echo "$encoders_list" | grep -qi 'c2.qti.hevc.encoder'; then
             CHOSEN_ENCODER="c2.qti.hevc.encoder"
             log_success "Hardware Encoder: Qualcomm Snapdragon Dedicated HEVC (c2.qti.hevc.encoder)"
         elif echo "$encoders_list" | grep -qi 'c2.mtk.hevc.encoder'; then
             CHOSEN_ENCODER="c2.mtk.hevc.encoder"
             log_success "Hardware Encoder: MediaTek Dedicated HEVC (c2.mtk.hevc.encoder)"
+        elif echo "$encoders_list" | grep -qi 'c2.exynos.hevc.encoder'; then
+            CHOSEN_ENCODER="c2.exynos.hevc.encoder"
+            log_success "Hardware Encoder: Samsung Exynos Dedicated HEVC (c2.exynos.hevc.encoder)"
         elif echo "$encoders_list" | grep -qi 'c2.android.hevc.encoder\|OMX.qcom.video.encoder.hevc'; then
             VIDEO_CODEC="h265"
             log_success "Hardware Encoder: H.265 (HEVC)"
@@ -534,89 +471,6 @@ profile_device() {
             VIDEO_CODEC="h264"
             log_info "Falling back to standard H.264 encoder"
         fi
-    fi
-}
-
-# ------------------------------------------------------------------------------
-# Module 4: Resolution Scaling & Fail-Safe Restoration
-# ------------------------------------------------------------------------------
-setup_screen_resolution() {
-    log_step "Adapting Screen Resolution to Match Host (${HOST_W}x${HOST_H} ${HOST_RATIO})"
-
-    # Read native dimensions and density
-    local wm_size_output wm_density_output
-    wm_size_output=$(adb shell wm size 2>/dev/null || true)
-    wm_density_output=$(adb shell wm density 2>/dev/null || true)
-
-    DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | awk -F': ' '/Physical size/ {print $2}' | tr -d '\r')
-    [ -z "$DEVICE_ORIG_SIZE" ] && DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | head -n1 | awk -F': ' '{print $2}' | tr -d '\r')
-
-    DEVICE_ORIG_DENSITY=$(echo "$wm_density_output" | awk -F': ' '/Physical density/ {print $2}' | tr -d '\r')
-    [ -z "$DEVICE_ORIG_DENSITY" ] && DEVICE_ORIG_DENSITY=$(echo "$wm_density_output" | head -n1 | awk -F': ' '{print $2}' | tr -d '\r')
-
-    log_info "POCO Native Resolution: ${DEVICE_ORIG_SIZE} | Density: ${DEVICE_ORIG_DENSITY} DPI"
-
-    if [ "$PERF_PROFILE" = "eco" ] || [ "$PERF_PROFILE" = "720p" ]; then
-        HOST_W=1280
-        HOST_H=854
-        TARGET_DENSITY=280
-        VIDEO_BITRATE="8M"
-        MAX_SIZE=1280
-        log_info "Profile [ESPORTS ECO]: 1280x854 (3:2) @ 8M Bitrate (Cooling & Battery Saver)"
-    else
-        # Calculate proportional DPI for host aspect ratio
-        local orig_h
-        orig_h=$(echo "$DEVICE_ORIG_SIZE" | cut -d'x' -f2)
-        if [ -n "$orig_h" ] && [ "$orig_h" -gt 0 ] && [ -n "$DEVICE_ORIG_DENSITY" ] && [ "$DEVICE_ORIG_DENSITY" -gt 0 ]; then
-            TARGET_DENSITY=$(( (DEVICE_ORIG_DENSITY * HOST_H) / orig_h ))
-            # Clamp density within functional UI range (260 to 420)
-            [ "$TARGET_DENSITY" -lt 260 ] && TARGET_DENSITY=280
-            [ "$TARGET_DENSITY" -gt 440 ] && TARGET_DENSITY=340
-        else
-            TARGET_DENSITY=280
-        fi
-        MAX_SIZE=1920
-        log_info "Profile [MAX QUALITY]: ${HOST_W}x${HOST_H} (3:2) @ ${VIDEO_BITRATE} Bitrate"
-    fi
-
-    log_info "Applying temporary gaming profile -> ${HOST_W}x${HOST_H} @ ${TARGET_DENSITY} DPI"
-    adb shell wm size "${HOST_W}x${HOST_H}"
-    adb shell wm density "${TARGET_DENSITY}"
-    DISPLAY_MODIFIED=1
-    log_success "Phone resolution aligned to 100% fullscreen host display."
-}
-
-restore_screen_resolution() {
-    if [ "$DISPLAY_MODIFIED" -eq 1 ] || [ "$RUN_MODE" = "reset" ]; then
-        log_info "Restoring POCO display size and density to factory defaults..."
-
-        # If disconnected (e.g. user pulled the USB-C cable), wait for reconnection
-        local state
-        state=$(adb get-state 2>/dev/null || echo "disconnected")
-        if [ "$state" != "device" ]; then
-            log_warn "POCO device is currently disconnected! Reconnect USB-C cable to restore original display."
-            log_info "Waiting up to 15 seconds for device reconnection..."
-            local count=0
-            while [ "$count" -lt 15 ]; do
-                state=$(adb get-state 2>/dev/null || echo "disconnected")
-                if [ "$state" = "device" ]; then
-                    log_success "POCO reconnected!"
-                    break
-                fi
-                sleep 1
-                count=$((count + 1))
-            done
-        fi
-
-        adb shell wm size reset 2>/dev/null || true
-        adb shell wm density reset 2>/dev/null || true
-
-        # Cleanly reload launcher grid in native geometry
-        adb shell am force-stop com.miui.home 2>/dev/null || true
-        adb shell am force-stop com.mi.android.globallauncher 2>/dev/null || true
-
-        DISPLAY_MODIFIED=0
-        log_success "Native display settings restored."
     fi
 }
 
@@ -657,10 +511,10 @@ restore_laptop_rotation() {
 # ------------------------------------------------------------------------------
 setup_device_orientation() {
     if [ -n "$REQUESTED_ROTATION" ]; then
-        log_step "Locking POCO Screen Orientation to ${REQUESTED_ROTATION}°"
+        log_step "Locking Device Screen Orientation to ${REQUESTED_ROTATION}°"
 
-        DEVICE_ORIG_ACCEL_ROTATION=$(adb shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r')
-        DEVICE_ORIG_USER_ROTATION=$(adb shell settings get system user_rotation 2>/dev/null | tr -d '\r')
+        DEVICE_ORIG_ACCEL_ROTATION=$(adb -s "$DEVICE_SERIAL" shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r')
+        DEVICE_ORIG_USER_ROTATION=$(adb -s "$DEVICE_SERIAL" shell settings get system user_rotation 2>/dev/null | tr -d '\r')
 
         case "$REQUESTED_ROTATION" in
             0)   ROTATION_NUM=0 ;;
@@ -671,58 +525,60 @@ setup_device_orientation() {
         esac
 
         log_info "Applying hardware orientation lock (${REQUESTED_ROTATION}° / index ${ROTATION_NUM})..."
-        adb shell wm set-ignore-orientation-request true 2>/dev/null || true
-        adb shell wm user-rotation lock "$ROTATION_NUM" 2>/dev/null || true
-        adb shell settings put system accelerometer_rotation 0 2>/dev/null || true
-        adb shell settings put system user_rotation "$ROTATION_NUM" 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell wm set-ignore-orientation-request true 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell wm user-rotation lock "$ROTATION_NUM" 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell settings put system accelerometer_rotation 0 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell settings put system user_rotation "$ROTATION_NUM" 2>/dev/null || true
         ROTATION_MODIFIED=1
-        log_success "POCO orientation locked to ${REQUESTED_ROTATION}° (ignores app rotation requests)."
+        log_success "Device orientation locked to ${REQUESTED_ROTATION}° (ignores app rotation requests)."
     fi
 }
 
 restore_device_orientation() {
     if [ "$ROTATION_MODIFIED" -eq 1 ] || [ "$RUN_MODE" = "reset" ]; then
-        log_info "Restoring POCO native orientation and accelerometer..."
+        log_info "Restoring device native orientation and accelerometer..."
         local state
         state=$(adb get-state 2>/dev/null || echo "disconnected")
         if [ "$state" = "device" ]; then
-            adb shell wm set-ignore-orientation-request reset 2>/dev/null || true
-            adb shell wm user-rotation free 2>/dev/null || true
-            adb shell settings put system accelerometer_rotation "${DEVICE_ORIG_ACCEL_ROTATION:-1}" 2>/dev/null || true
-            adb shell settings put system user_rotation "${DEVICE_ORIG_USER_ROTATION:-0}" 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" shell wm set-ignore-orientation-request reset 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" shell wm user-rotation free 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" shell settings put system accelerometer_rotation "${DEVICE_ORIG_ACCEL_ROTATION:-1}" 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" shell settings put system user_rotation "${DEVICE_ORIG_USER_ROTATION:-0}" 2>/dev/null || true
             ROTATION_MODIFIED=0
-            log_success "POCO accelerometer and orientation restored."
+            log_success "Device accelerometer and orientation restored."
         fi
     fi
 }
 
 # ------------------------------------------------------------------------------
-# Module 4.3: Android Desktop Mode (Freeform Windows inspired by DroidUP-Dex)
+# Module 4.3: Android Desktop Mode (Freeform Multi-Window DeX Environment)
 # ------------------------------------------------------------------------------
 setup_dex_mode() {
     log_step "Configuring Android Desktop DeX Mode (Freeform Windows)"
 
-    ORIG_FREEFORM=$(adb shell settings get global enable_freeform_support 2>/dev/null | tr -d '\r')
-    ORIG_RESIZABLE=$(adb shell settings get global force_resizable_activities 2>/dev/null | tr -d '\r')
+    ORIG_FREEFORM=$(adb -s "$DEVICE_SERIAL" shell settings get global enable_freeform_support 2>/dev/null | tr -d '\r')
+    ORIG_RESIZABLE=$(adb -s "$DEVICE_SERIAL" shell settings get global force_resizable_activities 2>/dev/null | tr -d '\r')
 
     log_info "Enabling Android Freeform windows and resizable activities..."
-    adb shell settings put global enable_freeform_support 1 2>/dev/null || true
-    adb shell settings put global force_resizable_activities 1 2>/dev/null || true
-    adb shell settings put global force_desktop_mode_on_external_displays 0 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put global enable_freeform_support 1 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put global force_resizable_activities 1 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put secure freeform_window_management 1 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put global force_desktop_mode_on_external_displays 0 2>/dev/null || true
     DEX_MODE_ACTIVE=1
     log_success "Android Freeform Desktop environment activated."
 
     # Detect or auto-install DroidUP Dex Launcher for full desktop UI (Taskbar, App drawer)
     local launcher_pkg="com.levelup.droiduplauncher"
-    if ! adb shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
+    if ! adb -s "$DEVICE_SERIAL" shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
         local apk_path="${SCRIPT_DIR}/payload/DroidUP-Dex-Launcher.apk"
         if [ -f "$apk_path" ]; then
             log_info "Installing Desktop DeX Launcher (${launcher_pkg})..."
-            adb install -r "$apk_path" 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" install -r "$apk_path" 2>/dev/null || true
         fi
     fi
 
-    if adb shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
+    if adb -s "$DEVICE_SERIAL" shell pm path "$launcher_pkg" 2>/dev/null | grep -q "package:"; then
+        adb -s "$DEVICE_SERIAL" shell appops set "$launcher_pkg" SYSTEM_ALERT_WINDOW allow 2>/dev/null || true
         DEX_LAUNCHER_ACTIVE="$launcher_pkg"
         log_success "Desktop DeX Launcher ready: ${launcher_pkg}"
     else
@@ -738,15 +594,15 @@ restore_dex_mode() {
         if [ "$state" = "device" ]; then
             log_info "Restoring Android window manager global settings..."
             if [ -n "$ORIG_FREEFORM" ] && [ "$ORIG_FREEFORM" != "null" ]; then
-                adb shell settings put global enable_freeform_support "$ORIG_FREEFORM" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put global enable_freeform_support "$ORIG_FREEFORM" 2>/dev/null || true
             else
-                adb shell settings delete global enable_freeform_support 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings delete global enable_freeform_support 2>/dev/null || true
             fi
 
             if [ -n "$ORIG_RESIZABLE" ] && [ "$ORIG_RESIZABLE" != "null" ]; then
-                adb shell settings put global force_resizable_activities "$ORIG_RESIZABLE" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put global force_resizable_activities "$ORIG_RESIZABLE" 2>/dev/null || true
             else
-                adb shell settings delete global force_resizable_activities 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings delete global force_resizable_activities 2>/dev/null || true
             fi
             DEX_MODE_ACTIVE=0
             log_success "Desktop mode global settings restored."
@@ -755,50 +611,117 @@ restore_dex_mode() {
 }
 
 sync_device_refresh_rate() {
-    log_step "Synchronizing POCO Refresh Rate to Host (${HOST_HZ} Hz)"
+    log_step "Synchronizing Refresh Rate to Host (${HOST_HZ} Hz)"
     log_info "Configuring Android system display pipeline to ${HOST_HZ} Hz..."
 
-    adb shell settings put system peak_refresh_rate "${HOST_HZ}.0" 2>/dev/null || true
-    adb shell settings put system min_refresh_rate "${HOST_HZ}.0" 2>/dev/null || true
-    adb shell settings put system user_refresh_rate "$HOST_HZ" 2>/dev/null || true
-    adb shell settings put system miui_refresh_rate "$HOST_HZ" 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put system peak_refresh_rate "${HOST_HZ}.0" 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put system min_refresh_rate "${HOST_HZ}.0" 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put system user_refresh_rate "$HOST_HZ" 2>/dev/null || true
+    adb -s "$DEVICE_SERIAL" shell settings put system miui_refresh_rate "$HOST_HZ" 2>/dev/null || true
     REFRESH_MODIFIED=1
-    log_success "POCO system refresh rate locked to ${HOST_HZ} Hz (VSYNC aligned)."
+    log_success "System refresh rate locked to ${HOST_HZ} Hz (VSYNC aligned)."
 }
 
 restore_device_refresh_rate() {
     if [ "$REFRESH_MODIFIED" -eq 1 ] || [ "$RUN_MODE" = "reset" ]; then
-        log_info "Restoring POCO refresh rate to original settings (${DEVICE_ORIG_PEAK_REFRESH:-120} Hz)..."
-
         local state
         state=$(adb get-state 2>/dev/null || echo "disconnected")
         if [ "$state" = "device" ]; then
+            log_info "Restoring native refresh rate..."
             if [ -n "$DEVICE_ORIG_PEAK_REFRESH" ] && [ "$DEVICE_ORIG_PEAK_REFRESH" != "null" ]; then
-                adb shell settings put system peak_refresh_rate "$DEVICE_ORIG_PEAK_REFRESH" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system peak_refresh_rate "$DEVICE_ORIG_PEAK_REFRESH" 2>/dev/null || true
             else
-                adb shell settings put system peak_refresh_rate 120.0 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system peak_refresh_rate 120.0 2>/dev/null || true
             fi
 
             if [ -n "$DEVICE_ORIG_MIN_REFRESH" ] && [ "$DEVICE_ORIG_MIN_REFRESH" != "null" ]; then
-                adb shell settings put system min_refresh_rate "$DEVICE_ORIG_MIN_REFRESH" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system min_refresh_rate "$DEVICE_ORIG_MIN_REFRESH" 2>/dev/null || true
             else
-                adb shell settings delete system min_refresh_rate 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings delete system min_refresh_rate 2>/dev/null || true
             fi
 
             if [ -n "$DEVICE_ORIG_USER_REFRESH" ] && [ "$DEVICE_ORIG_USER_REFRESH" != "null" ]; then
-                adb shell settings put system user_refresh_rate "$DEVICE_ORIG_USER_REFRESH" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system user_refresh_rate "$DEVICE_ORIG_USER_REFRESH" 2>/dev/null || true
             else
-                adb shell settings put system user_refresh_rate 120 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system user_refresh_rate 120 2>/dev/null || true
             fi
 
             if [ -n "$DEVICE_ORIG_MIUI_REFRESH" ] && [ "$DEVICE_ORIG_MIUI_REFRESH" != "null" ]; then
-                adb shell settings put system miui_refresh_rate "$DEVICE_ORIG_MIUI_REFRESH" 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system miui_refresh_rate "$DEVICE_ORIG_MIUI_REFRESH" 2>/dev/null || true
             else
-                adb shell settings put system miui_refresh_rate 120 2>/dev/null || true
+                adb -s "$DEVICE_SERIAL" shell settings put system miui_refresh_rate 120 2>/dev/null || true
             fi
 
             REFRESH_MODIFIED=0
-            log_success "POCO refresh rate restored to original state."
+            log_success "Refresh rate restored to original state."
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Module 4.4: Resolution Scaling & Launcher Preservation
+# ------------------------------------------------------------------------------
+setup_screen_resolution() {
+    log_step "Adapting Screen Resolution to Match Host (${HOST_W}x${HOST_H} ${HOST_RATIO})"
+
+    if [ "$PERF_PROFILE" = "eco" ] || [ "$PERF_PROFILE" = "720p" ]; then
+        HOST_W=1280
+        HOST_H=854
+        TARGET_DENSITY=280
+        VIDEO_BITRATE="8M"
+        MAX_SIZE=1280
+        log_info "Profile [ESPORTS ECO]: 1280x854 (3:2) @ 8M Bitrate (Cooling & Battery Saver)"
+    else
+        MAX_SIZE=1920
+        log_info "Profile [MAX QUALITY]: ${HOST_W}x${HOST_H} (3:2) @ ${VIDEO_BITRATE} Bitrate"
+    fi
+
+    log_info "Applying temporary gaming profile -> ${HOST_W}x${HOST_H} @ ${TARGET_DENSITY} DPI"
+    adb -s "$DEVICE_SERIAL" shell wm size "${HOST_W}x${HOST_H}"
+    adb -s "$DEVICE_SERIAL" shell wm density "${TARGET_DENSITY}"
+    DISPLAY_MODIFIED=1
+    log_success "Phone resolution aligned to 100% fullscreen host display."
+}
+
+restore_launcher_layout() {
+    log_info "Reloading home screen launcher layout to preserve clean icon arrangement..."
+    local launchers=(
+        "com.miui.home"
+        "com.mi.android.globallauncher"
+        "com.google.android.apps.nexuslauncher"
+        "com.sec.android.app.launcher"
+        "com.motorola.launcher3"
+        "com.oppo.launcher"
+        "com.huawei.android.launcher"
+    )
+    for pkg in "${launchers[@]}"; do
+        adb -s "$DEVICE_SERIAL" shell am force-stop "$pkg" 2>/dev/null || true
+    done
+    log_success "Home screen launcher reloaded."
+}
+
+restore_screen_resolution() {
+    if [ "$DISPLAY_MODIFIED" -eq 1 ] || [ "$RUN_MODE" = "reset" ]; then
+        local state
+        state=$(adb get-state 2>/dev/null || echo "disconnected")
+        if [ "$state" != "device" ]; then
+            log_warn "Device disconnected. Waiting up to 10s for reconnect to restore display settings..."
+            for _ in {1..10}; do
+                sleep 1
+                state=$(adb get-state 2>/dev/null || echo "disconnected")
+                if [ "$state" = "device" ]; then break; fi
+            done
+        fi
+
+        if [ "$state" = "device" ]; then
+            log_info "Resetting device display size and density to factory defaults..."
+            adb -s "$DEVICE_SERIAL" shell wm size reset 2>/dev/null || true
+            adb -s "$DEVICE_SERIAL" shell wm density reset 2>/dev/null || true
+            restore_launcher_layout
+            DISPLAY_MODIFIED=0
+            log_success "Native display settings restored."
+        else
+            log_warn "Device unreachable. Native resolution will restore automatically on next USB connect."
         fi
     fi
 }
@@ -809,16 +732,33 @@ restore_device_refresh_rate() {
 launch_scrcpy() {
     log_step "Launching Low-Latency Game Session"
 
-    local scrcpy_cmd=("scrcpy" "-d")
+    local scrcpy_cmd=("scrcpy")
 
-    # Force ADB forward for maximum connection stability (from jogar_poco.sh)
+    # In OTG mode, scrcpy uses raw USB; bind strictly to device serial to prevent webcam conflicts
+    if [ "$RUN_MODE" = "otg" ]; then
+        scrcpy_cmd+=("-s" "${DEVICE_SERIAL}")
+        scrcpy_cmd+=("--otg")
+        log_info "Running in Pure Hardware KVM Docking Mode (--otg -s ${DEVICE_SERIAL})"
+        log_info "Executing: ${scrcpy_cmd[*]}"
+        echo -e "${C_GREEN}${C_BOLD}>>> KVM MODE ACTIVE! <<<${C_RESET}"
+        echo -e "  Your PC keyboard and mouse are now directly connected to your phone via USB HID."
+        echo -e "  To exit cleanly: Press ${C_BOLD}Ctrl+C${C_RESET}\n"
+
+        "${scrcpy_cmd[@]}" &
+        SCRCPY_PID=$!
+        wait "$SCRCPY_PID" 2>/dev/null || true
+        SCRCPY_PID=""
+        return 0
+    fi
+
+    # Standard video streaming modes
+    scrcpy_cmd+=("-s" "${DEVICE_SERIAL}")
+
     if [ "${FORCE_ADB_FORWARD:-1}" -eq 1 ]; then
         scrcpy_cmd+=("--force-adb-forward")
     fi
 
-    # Forced orientation in scrcpy capture if requested.
-    # Note: When matching a landscape host (1920x1280), the display buffer is already horizontal.
-    # Applying @270 rotates a landscape display into portrait (1280x1920). Only rotate if explicit portrait is desired.
+    # Apply capture rotation ONLY if user explicitly asked for Portrait on a Landscape screen
     if [ -n "$REQUESTED_ROTATION" ]; then
         if [ "$REQUESTED_ROTATION" = "0" ] || [ "$REQUESTED_ROTATION" = "180" ]; then
             scrcpy_cmd+=("--capture-orientation=@${REQUESTED_ROTATION}")
@@ -829,7 +769,6 @@ launch_scrcpy() {
         dex)
             log_info "Running in Android Desktop DeX Mode (Freeform Windows + Virtual Display)"
             scrcpy_cmd+=("--new-display=${HOST_W}x${HOST_H}/${TARGET_DENSITY}")
-            scrcpy_cmd+=("--no-vd-system-decorations")
             scrcpy_cmd+=("-f")
             scrcpy_cmd+=("--video-codec=${VIDEO_CODEC:-h265}")
             scrcpy_cmd+=("--video-buffer=${VIDEO_BUFFER:-0}")
@@ -837,7 +776,6 @@ launch_scrcpy() {
             scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
             scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
 
-            # Auto-launch desktop environment launcher on virtual display
             if [ -n "${DEX_LAUNCHER_ACTIVE:-}" ]; then
                 scrcpy_cmd+=("--start-app=${DEX_LAUNCHER_ACTIVE}")
             fi
@@ -852,10 +790,27 @@ launch_scrcpy() {
                 scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
             fi
             ;;
+        mirror)
+            log_info "Running in Pure Native 1:1 Mirroring Mode (No display resizing)"
+            scrcpy_cmd+=("--video-codec=${VIDEO_CODEC:-h265}")
+            scrcpy_cmd+=("--video-buffer=${VIDEO_BUFFER:-0}")
+            scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0")
+            scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
+            scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
+
+            [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off")
+            [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")
+            [ "${ENABLE_UHID_KEYBOARD:-1}" -eq 1 ] && scrcpy_cmd+=("--keyboard=uhid")
+            [ "${ENABLE_UHID_MOUSE:-1}" -eq 1 ] && scrcpy_cmd+=("--mouse=uhid")
+            [ "${ENABLE_UHID_GAMEPAD:-1}" -eq 1 ] && scrcpy_cmd+=("--gamepad=uhid")
+
+            if [ -n "$CHOSEN_ENCODER" ]; then
+                scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
+            fi
+            ;;
         virtual)
             log_info "Running in Secondary Virtual Display Mode (--new-display)"
             scrcpy_cmd+=("--new-display=${HOST_W}x${HOST_H}/${TARGET_DENSITY}")
-            scrcpy_cmd+=("--no-vd-system-decorations")
             scrcpy_cmd+=("-f")
             scrcpy_cmd+=("--video-codec=${VIDEO_CODEC:-h265}")
             scrcpy_cmd+=("--video-buffer=${VIDEO_BUFFER:-0}")
@@ -873,25 +828,21 @@ launch_scrcpy() {
                 scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
             fi
             ;;
-        otg)
-            log_info "Running in Pure Hardware Docking Mode (--otg)"
-            scrcpy_cmd+=("--otg")
-            ;;
         normal|daemon)
             log_info "Applying Fullscreen Low-Latency Pipeline (${PERF_PROFILE:-max} profile)"
-            scrcpy_cmd+=("-f")                                                # Fullscreen
-            scrcpy_cmd+=("--video-buffer=${VIDEO_BUFFER:-0}")                 # 0ms pipeline video buffer
-            scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0") # Realtime 0 latency queue
-            scrcpy_cmd+=("--video-codec=${VIDEO_CODEC:-h265}")                # Fast H.265 / HEVC
-            scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")            # Bitrate
-            scrcpy_cmd+=("--max-size=${MAX_SIZE:-1920}")                      # Max frame dimension
-            scrcpy_cmd+=("--max-fps=${TARGET_FPS}")                           # Matched refresh rate
+            scrcpy_cmd+=("-f")
+            scrcpy_cmd+=("--video-buffer=${VIDEO_BUFFER:-0}")
+            scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0")
+            scrcpy_cmd+=("--video-codec=${VIDEO_CODEC:-h265}")
+            scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
+            scrcpy_cmd+=("--max-size=${MAX_SIZE:-1920}")
+            scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
 
-            [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off") # Prevent phone heating
-            [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")           # Prevent OS sleep
-            [ "${ENABLE_UHID_KEYBOARD:-1}" -eq 1 ] && scrcpy_cmd+=("--keyboard=uhid") # Direct kernel HID input
-            [ "${ENABLE_UHID_MOUSE:-1}" -eq 1 ] && scrcpy_cmd+=("--mouse=uhid")       # Direct kernel HID mouse
-            [ "${ENABLE_UHID_GAMEPAD:-1}" -eq 1 ] && scrcpy_cmd+=("--gamepad=uhid")   # Pass physical PC controller as Android gamepad
+            [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off")
+            [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")
+            [ "${ENABLE_UHID_KEYBOARD:-1}" -eq 1 ] && scrcpy_cmd+=("--keyboard=uhid")
+            [ "${ENABLE_UHID_MOUSE:-1}" -eq 1 ] && scrcpy_cmd+=("--mouse=uhid")
+            [ "${ENABLE_UHID_GAMEPAD:-1}" -eq 1 ] && scrcpy_cmd+=("--gamepad=uhid")
 
             if [ -n "$CHOSEN_ENCODER" ]; then
                 scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
@@ -906,55 +857,47 @@ launch_scrcpy() {
     else
         scrcpy_cmd+=("--audio-buffer=${AUDIO_BUFFER:-50}")
         scrcpy_cmd+=("--audio-source=${AUDIO_SOURCE:-playback}")
-        [ "${AUDIO_DUP:-1}" -eq 1 ] && scrcpy_cmd+=("--audio-dup")       # Play on PC + Phone simultaneously
+        [ "${AUDIO_DUP:-1}" -eq 1 ] && scrcpy_cmd+=("--audio-dup")
         [ -n "${AUDIO_CODEC:-}" ] && scrcpy_cmd+=("--audio-codec=${AUDIO_CODEC}")
     fi
 
     log_info "Executing: ${scrcpy_cmd[*]}"
-    echo -e "${C_GREEN}${C_BOLD}>>> GAME ON! <<<${C_RESET}"
-    echo -e "  To exit cleanly: Press ${C_BOLD}Alt+F4${C_RESET} or ${C_BOLD}Super+Q${C_RESET} (or Ctrl+C in terminal)\n"
+    echo -e "${C_GREEN}${C_BOLD}>>> SESSION READY! <<<${C_RESET}"
+    echo -e "  To exit cleanly: Press ${C_BOLD}Alt+F4${C_RESET} or ${C_BOLD}Super+Q${C_RESET} (or Ctrl+C in terminal)"
+    echo -e "  Toggle Phone Screen on/off anytime: Press ${C_BOLD}Alt+O${C_RESET}\n"
 
     # Run scrcpy in background and track PID to guarantee clean SIGINT termination
     "${scrcpy_cmd[@]}" &
     SCRCPY_PID=$!
     wait "$SCRCPY_PID" 2>/dev/null || true
     SCRCPY_PID=""
-
-    # Complete restoration sequence
-    restore_laptop_rotation
-    restore_dex_mode
-    restore_device_orientation
-    restore_device_refresh_rate
-    restore_screen_resolution
 }
 
 # ------------------------------------------------------------------------------
-# Module 6: Daemon Plug-and-Play Mode
+# Module 6: Background Daemon Mode
 # ------------------------------------------------------------------------------
 run_daemon_mode() {
-    log_step "Starting Plug-and-Play Daemon Mode"
-    log_info "Watching for POCO connection via USB... (Press Ctrl+C to stop)"
+    log_step "Starting Background Daemon Mode"
+    log_info "Monitoring for connected devices... (Press Ctrl+C to stop)"
 
     while true; do
         local state
         state=$(adb get-state 2>/dev/null || echo "disconnected")
         if [ "$state" = "device" ]; then
-            log_success "POCO connected! Initializing gaming environment..."
+            log_success "Device connection detected! Launching session..."
             detect_host_display
             profile_device
-            [ "$LOCK_LAPTOP_ROTATION" -eq 1 ] && lock_laptop_rotation
             setup_screen_resolution
             sync_device_refresh_rate
-            setup_device_orientation
             launch_scrcpy
-            log_info "Session finished. Waiting for next device connection..."
+            log_info "Session finished. Resuming background monitor..."
         fi
         sleep 2
     done
 }
 
 # ------------------------------------------------------------------------------
-# Help and Usage
+# Help Dialog
 # ------------------------------------------------------------------------------
 show_help() {
     echo -e "${C_BOLD}${APP_NAME} v${VERSION}${C_RESET}
@@ -962,17 +905,18 @@ show_help() {
 Usage: $(basename "$0") [OPTIONS]
 
 Operational Modes:
-  (no args)               Standard Fullscreen Zero-Latency Game Mode (Auto 3:2 adaptation)
-  --eco, --720p           Esports Eco Mode (1280x854 3:2 @ 8M - Low Heat & Battery Saver)
-  --max, --1080p          Maximum Quality Mode (1920x1280 3:2 @ 16M Bitrate)
-  --dex, --desktop        Android Desktop DeX Mode (Freeform windows + No-decorations Virtual Display)
-  --virtual               Secondary Virtual Display Mode (keeps phone screen free & untouched)
-  --otg, --dock           Pure Hardware Dock Mode (KVM mouse & keyboard control via USB)
-  --daemon                Background daemon mode: Auto-launches session whenever POCO is plugged in
+  (no args)               Standard Fullscreen Zero-Latency Game Mode (Auto Host Aspect Adaptation)
+  --eco, --720p           Esports Eco Mode (1280x854 @ 8M - Low Heat & Battery Saver)
+  --max, --1080p          Maximum Quality Mode (1920x1280 @ 16M Bitrate)
+  --mirror                Pure Native 1:1 Mirroring Mode (No display resizing, zero layout scramble)
+  --dex, --desktop        Android Desktop DeX Mode (Freeform Multi-Window Desktop on Virtual Display)
+  --virtual               Secondary Virtual Display Mode (Keeps phone screen free & untouched)
+  --otg, --dock           Hardware KVM Dock Mode (PC keyboard & mouse directly via USB HID)
+  --daemon                Background daemon mode: Auto-launches session whenever phone is connected
 
-Screen Orientation & Display Controls:
-  --landscape, -l         Force POCO screen to Landscape mode (270° standard for emulators)
-  --portrait, -p          Force POCO screen to Portrait mode (0° vertical)
+Screen & Controls:
+  --landscape, -l         Force screen to Landscape mode (270° standard for emulators)
+  --portrait, -p          Force screen to Portrait mode (0° vertical)
   --rotate <0|90|180|270> Force arbitrary hardware screen rotation angle
   --lock-laptop           Lock laptop screen rotation in Zorin OS (prevents 2-in-1 auto-rotation)
   --turn-screen-off, -S   Turn phone screen off during session (saves battery and heat)
@@ -988,6 +932,7 @@ System & Recovery:
   --install               Force run dependency and udev installer
   --check                 Verify dependencies and environment only (no launch)
   --reset                 Emergency reset: Restores resolution, density, Hz, rotation, and laptop lock
+  --reset-launcher        Force reload home screen launcher layout to fix icon arrangement
   -h, --help              Show this help message
 "
 }
@@ -1020,6 +965,11 @@ main() {
                 restore_device_orientation
                 restore_device_refresh_rate
                 restore_screen_resolution
+                exit 0
+                ;;
+            --reset-launcher)
+                profile_device
+                restore_launcher_layout
                 exit 0
                 ;;
             --landscape|-l)
@@ -1057,6 +1007,9 @@ main() {
                 ;;
             --max|--1080p)
                 PERF_PROFILE="max"
+                ;;
+            --mirror)
+                RUN_MODE="mirror"
                 ;;
             --dex|--desktop)
                 RUN_MODE="dex"
@@ -1113,6 +1066,9 @@ main() {
                 sync_device_refresh_rate
                 ;;
             virtual)
+                sync_device_refresh_rate
+                ;;
+            mirror)
                 sync_device_refresh_rate
                 ;;
             normal)

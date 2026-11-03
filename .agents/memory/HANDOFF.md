@@ -1,10 +1,14 @@
-# Handoff: POCO Game Engine GUI Implementation
+# Handoff: OmniLink Mobile Engine v2.0.0
 
-- **Status**: Complete & Verified.
-- **Implemented**:
-  - Python 3 + GTK 4 + Libadwaita desktop application (`app/main.py`, `app/ui/window.py`, `app/ui/widgets.py`, `app/backend/adb.py`, `app/backend/session.py`).
-  - Executable wrapper: `poco-gaming-gui`.
-  - Application icon: `assets/poco-gaming.svg`.
-  - Desktop integration: `poco-gaming.desktop` installed to `~/.local/share/applications/`.
-- **How to Test / Run**:
-  - Run `./poco-gaming-gui` in terminal or search "POCO Game Engine" in the Zorin OS Start Menu.
+- **Current Status**: Complete, Universalized & Fully Verified.
+- **Key Changes Implemented**:
+  1. Universal rebranding to **OmniLink Mobile Engine** (`omnilink.sh`, `omnilink-gui`, `omnilink.desktop`).
+  2. Global screen off toggle in UI and CLI across all profiles.
+  3. DeX mode multi-window freeform support with DroidUP launcher auto-start.
+  4. Hardware KVM mode raw USB binding fix (`-s "$DEVICE_SERIAL"`).
+  5. Pure 1:1 Mirroring mode (zero icon scrambling).
+  6. Home screen launcher layout reload action (`--reset-launcher` / UI button).
+  7. Full Constitutional documentation (`docs/`, ADRs, SemVer 2.0.0 CHANGELOG, MIT LICENSE).
+- **How to Launch**:
+  - Double-click **OmniLink Mobile Engine** on the Desktop (`~/Área de trabalho/`).
+  - Or run `./omnilink-gui` from the project directory.
