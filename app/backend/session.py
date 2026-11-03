@@ -88,6 +88,8 @@ class SessionManager:
 
             if options.screen_off:
                 cmd.append("--turn-screen-off")
+            else:
+                cmd.append("--keep-screen-on")
 
             # Environment
             env = os.environ.copy()

@@ -478,6 +478,28 @@ profile_device() {
 
     log_success "Connected: ${dev_brand} ${dev_model} [SoC: ${dev_platform:-$dev_soc}]"
 
+    # Read physical resolution and density
+    local wm_size_output wm_density_output
+    wm_size_output=$(adb shell wm size 2>/dev/null || true)
+    wm_density_output=$(adb shell wm density 2>/dev/null || true)
+
+    DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | awk -F': ' '/Physical size/ {print $2}' | tr -d '\r')
+    [ -z "$DEVICE_ORIG_SIZE" ] && DEVICE_ORIG_SIZE=$(echo "$wm_size_output" | head -n1 | awk -F': ' '{print $2}' | tr -d '\r')
+
+    DEVICE_ORIG_DENSITY=$(echo "$wm_density_output" | awk -F': ' '/Physical density/ {print $2}' | tr -d '\r')
+    [ -z "$DEVICE_ORIG_DENSITY" ] && DEVICE_ORIG_DENSITY=$(echo "$wm_density_output" | head -n1 | awk -F': ' '{print $2}' | tr -d '\r')
+
+    # Compute baseline TARGET_DENSITY
+    local orig_h
+    orig_h=$(echo "$DEVICE_ORIG_SIZE" | cut -d'x' -f2)
+    if [ -n "$orig_h" ] && [ "$orig_h" -gt 0 ] && [ -n "$DEVICE_ORIG_DENSITY" ] && [ "$DEVICE_ORIG_DENSITY" -gt 0 ]; then
+        TARGET_DENSITY=$(( (DEVICE_ORIG_DENSITY * HOST_H) / orig_h ))
+        [ "$TARGET_DENSITY" -lt 260 ] && TARGET_DENSITY=280
+        [ "$TARGET_DENSITY" -gt 440 ] && TARGET_DENSITY=340
+    else
+        TARGET_DENSITY=280
+    fi
+
     # Read and Backup Original Phone Refresh Rate Configuration
     DEVICE_ORIG_PEAK_REFRESH=$(adb shell settings get system peak_refresh_rate 2>/dev/null | tr -d '\r')
     DEVICE_ORIG_MIN_REFRESH=$(adb shell settings get system min_refresh_rate 2>/dev/null | tr -d '\r')
@@ -783,6 +805,16 @@ launch_scrcpy() {
             scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0")
             scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
             scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
+
+            [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off")
+            [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")
+            [ "${ENABLE_UHID_KEYBOARD:-1}" -eq 1 ] && scrcpy_cmd+=("--keyboard=uhid")
+            [ "${ENABLE_UHID_MOUSE:-1}" -eq 1 ] && scrcpy_cmd+=("--mouse=uhid")
+            [ "${ENABLE_UHID_GAMEPAD:-1}" -eq 1 ] && scrcpy_cmd+=("--gamepad=uhid")
+
+            if [ -n "$CHOSEN_ENCODER" ]; then
+                scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
+            fi
             ;;
         virtual)
             log_info "Running in Secondary Virtual Display Mode (--new-display)"
@@ -794,6 +826,16 @@ launch_scrcpy() {
             scrcpy_cmd+=("--video-codec-options=latency:int=0,priority:int=0")
             scrcpy_cmd+=("--video-bit-rate=${VIDEO_BITRATE:-16M}")
             scrcpy_cmd+=("--max-fps=${TARGET_FPS}")
+
+            [ "${TURN_SCREEN_OFF:-1}" -eq 1 ] && scrcpy_cmd+=("--turn-screen-off")
+            [ "${STAY_AWAKE:-1}" -eq 1 ] && scrcpy_cmd+=("--stay-awake")
+            [ "${ENABLE_UHID_KEYBOARD:-1}" -eq 1 ] && scrcpy_cmd+=("--keyboard=uhid")
+            [ "${ENABLE_UHID_MOUSE:-1}" -eq 1 ] && scrcpy_cmd+=("--mouse=uhid")
+            [ "${ENABLE_UHID_GAMEPAD:-1}" -eq 1 ] && scrcpy_cmd+=("--gamepad=uhid")
+
+            if [ -n "$CHOSEN_ENCODER" ]; then
+                scrcpy_cmd+=("--video-encoder=${CHOSEN_ENCODER}")
+            fi
             ;;
         otg)
             log_info "Running in Pure Hardware Docking Mode (--otg)"
@@ -889,7 +931,7 @@ Operational Modes:
   --max, --1080p          Maximum Quality Mode (1920x1280 3:2 @ 16M Bitrate)
   --dex, --desktop        Android Desktop DeX Mode (Freeform windows + No-decorations Virtual Display)
   --virtual               Secondary Virtual Display Mode (keeps phone screen free & untouched)
-  --otg                   Pure Hardware Dock Mode (KVM mouse & keyboard control via USB)
+  --otg, --dock           Pure Hardware Dock Mode (KVM mouse & keyboard control via USB)
   --daemon                Background daemon mode: Auto-launches session whenever POCO is plugged in
 
 Screen Orientation & Display Controls:
@@ -897,10 +939,13 @@ Screen Orientation & Display Controls:
   --portrait, -p          Force POCO screen to Portrait mode (0° vertical)
   --rotate <0|90|180|270> Force arbitrary hardware screen rotation angle
   --lock-laptop           Lock laptop screen rotation in Zorin OS (prevents 2-in-1 auto-rotation)
+  --turn-screen-off, -S   Turn phone screen off during session (saves battery and heat)
+  --keep-screen-on        Keep phone screen on during session
 
 Audio Controls:
-  --no-audio              Disable audio streaming (lowest processing latency, audio on phone)
-  --audio-dup             Stream audio to PC and keep playing on phone speakers (default)
+  --no-audio, --audio-off Disable audio streaming (lowest processing latency, audio on phone)
+  --audio-dual, --audio-dup Stream audio to PC and keep playing on phone speakers (default)
+  --audio-pc              Stream audio to PC only (mute phone)
 
 System & Recovery:
   -y, --yes               Auto-install missing dependencies non-interactively
@@ -954,12 +999,22 @@ main() {
             --lock-laptop)
                 LOCK_LAPTOP_ROTATION=1
                 ;;
-            --no-audio)
+            --turn-screen-off|-S)
+                TURN_SCREEN_OFF=1
+                ;;
+            --keep-screen-on|--no-turn-screen-off)
+                TURN_SCREEN_OFF=0
+                ;;
+            --no-audio|--audio-off)
                 DISABLE_AUDIO=1
                 ;;
-            --audio-dup)
+            --audio-dup|--audio-dual)
                 DISABLE_AUDIO=0
                 AUDIO_DUP=1
+                ;;
+            --audio-pc)
+                DISABLE_AUDIO=0
+                AUDIO_DUP=0
                 ;;
             --eco|--720p)
                 PERF_PROFILE="eco"
@@ -973,7 +1028,7 @@ main() {
             --virtual)
                 RUN_MODE="virtual"
                 ;;
-            --otg)
+            --otg|--dock)
                 RUN_MODE="otg"
                 ;;
             --daemon)
