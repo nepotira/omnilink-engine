@@ -11,3 +11,7 @@
 ## 2026-11-01: Process Trapping with Snap Wrappers, Disconnect Handling and Audio Buffering
 - **Context**: The Snap launcher for scrcpy runs in a subshell without `exec`, so pressing Ctrl+C in terminal does not kill the child `scrcpy` binary, leaving the session and resolution override active. If the USB cable is unplugged, `adb shell wm size reset` fails unless it handles reconnection. Additionally, `--audio-buffer=20` is too low for PipeWire on Ubuntu/Zorin (causing audio underrun/silence), and HyperOS can mute media if audio routing isn't duplicated or specified.
 - **Correction**: Track `SCRCPY_PID` and explicitly terminate child processes in `cleanup()`; add a reconnection wait loop in `restore_screen_resolution`; add self-healing resolution reset check at startup; use a stable 50ms audio buffer and `--audio-dup` with `--audio-source=playback`.
+
+## 2026-11-03: GUI Apps must provide a direct double-clickable Desktop Launcher
+- **Context**: When asked for a Graphical User Interface, do not expect the user to open a terminal or type commands to execute it.
+- **Correction**: Always generate a `.desktop` file on the user's Desktop (`~/Área de trabalho/` or `~/Desktop`), set execution permissions (`chmod +x`), and mark it trusted (`gio set ... metadata::trusted true`) so double-clicking immediately launches the application window with full desktop styling without opening any terminal.
