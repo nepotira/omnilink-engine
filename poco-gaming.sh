@@ -54,7 +54,9 @@ TURN_SCREEN_OFF=1
 STAY_AWAKE=1
 
 # Orientation Controls
-REQUESTED_ROTATION="" # 0, 90, 180, 270
+WINDOW_ORIENTATION="auto" # auto, horizontal, vertical
+FORCE_DEVICE_ROTATION="" # 0, 90, 180, 270 (if user explicitly requests hardware lock)
+REQUESTED_ROTATION="" # backwards compatibility
 ROTATION_NUM=3
 LOCK_LAPTOP_ROTATION=0
 ORIG_LAPTOP_LOCK=""
@@ -507,16 +509,16 @@ restore_laptop_rotation() {
 }
 
 # ------------------------------------------------------------------------------
-# Module 4.2: Phone Forced Screen Orientation Lock
+# Module 4.2: Phone Screen & Window Orientation Configuration
 # ------------------------------------------------------------------------------
 setup_device_orientation() {
-    if [ -n "$REQUESTED_ROTATION" ]; then
-        log_step "Locking Device Screen Orientation to ${REQUESTED_ROTATION}°"
+    if [ -n "$FORCE_DEVICE_ROTATION" ]; then
+        log_step "Locking Device Hardware Screen Orientation to ${FORCE_DEVICE_ROTATION}°"
 
         DEVICE_ORIG_ACCEL_ROTATION=$(adb -s "$DEVICE_SERIAL" shell settings get system accelerometer_rotation 2>/dev/null | tr -d '\r')
         DEVICE_ORIG_USER_ROTATION=$(adb -s "$DEVICE_SERIAL" shell settings get system user_rotation 2>/dev/null | tr -d '\r')
 
-        case "$REQUESTED_ROTATION" in
+        case "$FORCE_DEVICE_ROTATION" in
             0)   ROTATION_NUM=0 ;;
             90)  ROTATION_NUM=1 ;;
             180) ROTATION_NUM=2 ;;
@@ -524,13 +526,18 @@ setup_device_orientation() {
             *)   ROTATION_NUM=3 ;;
         esac
 
-        log_info "Applying hardware orientation lock (${REQUESTED_ROTATION}° / index ${ROTATION_NUM})..."
+        log_info "Applying hardware orientation lock (${FORCE_DEVICE_ROTATION}° / index ${ROTATION_NUM})..."
         adb -s "$DEVICE_SERIAL" shell wm set-ignore-orientation-request true 2>/dev/null || true
         adb -s "$DEVICE_SERIAL" shell wm user-rotation lock "$ROTATION_NUM" 2>/dev/null || true
         adb -s "$DEVICE_SERIAL" shell settings put system accelerometer_rotation 0 2>/dev/null || true
         adb -s "$DEVICE_SERIAL" shell settings put system user_rotation "$ROTATION_NUM" 2>/dev/null || true
         ROTATION_MODIFIED=1
-        log_success "Device orientation locked to ${REQUESTED_ROTATION}° (ignores app rotation requests)."
+        log_success "Device orientation locked to ${FORCE_DEVICE_ROTATION}° (ignores app rotation requests)."
+    else
+        # Ensure device accelerometer is active and unconstrained so Android and apps rotate naturally
+        adb -s "$DEVICE_SERIAL" shell wm set-ignore-orientation-request reset 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell wm user-rotation free 2>/dev/null || true
+        adb -s "$DEVICE_SERIAL" shell settings put system accelerometer_rotation 1 2>/dev/null || true
     fi
 }
 
@@ -662,6 +669,12 @@ restore_device_refresh_rate() {
 # Module 4.4: Resolution Scaling & Launcher Preservation
 # ------------------------------------------------------------------------------
 setup_screen_resolution() {
+    # If window orientation is automatic or vertical, do NOT force landscape resolution on phone
+    if [ "$WINDOW_ORIENTATION" != "horizontal" ]; then
+        log_info "Window orientation is ${WINDOW_ORIENTATION}: preserving native phone resolution to allow seamless dynamic rotation."
+        return 0
+    fi
+
     log_step "Adapting Screen Resolution to Match Host (${HOST_W}x${HOST_H} ${HOST_RATIO})"
 
     if [ "$PERF_PROFILE" = "eco" ] || [ "$PERF_PROFILE" = "720p" ]; then
@@ -758,12 +771,21 @@ launch_scrcpy() {
         scrcpy_cmd+=("--force-adb-forward")
     fi
 
-    # Apply capture rotation ONLY if user explicitly asked for Portrait on a Landscape screen
-    if [ -n "$REQUESTED_ROTATION" ]; then
-        if [ "$REQUESTED_ROTATION" = "0" ] || [ "$REQUESTED_ROTATION" = "180" ]; then
-            scrcpy_cmd+=("--capture-orientation=@${REQUESTED_ROTATION}")
-        fi
-    fi
+    # Apply PC Window Orientation (Horizontal, Vertical, or Automatic)
+    case "$WINDOW_ORIENTATION" in
+        horizontal)
+            log_info "Locking PC window orientation to Horizontal / Landscape (@270)"
+            scrcpy_cmd+=("--capture-orientation=@270")
+            ;;
+        vertical)
+            log_info "Locking PC window orientation to Vertical / Portrait (@0)"
+            scrcpy_cmd+=("--capture-orientation=@0")
+            ;;
+        auto|*)
+            log_info "Window orientation set to Automatic (follows device rotation dynamically)"
+            # Dynamic orientation: no @ lock, allowing window to follow phone orientation in real-time
+            ;;
+    esac
 
     case "$RUN_MODE" in
         dex)
@@ -915,9 +937,12 @@ Operational Modes:
   --daemon                Background daemon mode: Auto-launches session whenever phone is connected
 
 Screen & Controls:
-  --landscape, -l         Force screen to Landscape mode (270° standard for emulators)
-  --portrait, -p          Force screen to Portrait mode (0° vertical)
-  --rotate <0|90|180|270> Force arbitrary hardware screen rotation angle
+  --window-auto, --auto   Automatic window orientation: Dynamically rotates PC window as phone rotates (default)
+  --window-horizontal, --horizontal, -l Force PC window to Horizontal / Landscape orientation (@270)
+  --window-vertical, --vertical, -p   Force PC window to Vertical / Portrait orientation (@0)
+  --landscape             Alias for --window-horizontal
+  --portrait              Alias for --window-vertical
+  --force-device-rotate <0|90|180|270> Force arbitrary hardware screen rotation on Android device
   --lock-laptop           Lock laptop screen rotation in Zorin OS (prevents 2-in-1 auto-rotation)
   --turn-screen-off, -S   Turn phone screen off during session (saves battery and heat)
   --keep-screen-on        Keep phone screen on during session
@@ -972,15 +997,18 @@ main() {
                 restore_launcher_layout
                 exit 0
                 ;;
-            --landscape|-l)
-                REQUESTED_ROTATION="270"
+            --window-auto|--auto)
+                WINDOW_ORIENTATION="auto"
                 ;;
-            --portrait|-p)
-                REQUESTED_ROTATION="0"
+            --window-horizontal|--horizontal|--landscape|-l)
+                WINDOW_ORIENTATION="horizontal"
                 ;;
-            --rotate)
+            --window-vertical|--vertical|--portrait|-p)
+                WINDOW_ORIENTATION="vertical"
+                ;;
+            --rotate|--force-device-rotate)
                 shift
-                REQUESTED_ROTATION="${1:-270}"
+                FORCE_DEVICE_ROTATION="${1:-270}"
                 ;;
             --lock-laptop)
                 LOCK_LAPTOP_ROTATION=1

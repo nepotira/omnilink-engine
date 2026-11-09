@@ -89,16 +89,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.switch_screen_off.set_active(True)
         group_settings.add(self.switch_screen_off)
 
-        # Phone Rotation
-        self.combo_rotation = Adw.ComboRow(title="Orientação da Tela do Aparelho")
-        rot_model = Gtk.StringList.new([
-            "🌐 Automática / Livre (Recomendado)",
-            "🔄 Forçar Paisagem (270° - Ideal para Emuladores)",
-            "📱 Forçar Retrato (0°)"
+        # Window Orientation (Computer Window Format)
+        self.combo_window_orientation = Adw.ComboRow(
+            title="Orientação da Janela no Computador",
+            subtitle="Define o formato da janela no PC (Automática segue o celular; Horizontal e Vertical forçam a exibição)"
+        )
+        window_rot_model = Gtk.StringList.new([
+            "🔄 Automática (Acompanha a rotação do celular)",
+            "🖥️ Janela Horizontal (Obrigatória / Paisagem)",
+            "📱 Janela Vertical (Obrigatória / Retrato)"
         ])
-        self.combo_rotation.set_model(rot_model)
-        self.combo_rotation.set_selected(0)
-        group_settings.add(self.combo_rotation)
+        self.combo_window_orientation.set_model(window_rot_model)
+        self.combo_window_orientation.set_selected(0)
+        group_settings.add(self.combo_window_orientation)
 
         # Laptop Orientation Lock
         self.switch_laptop_lock = Adw.SwitchRow(
@@ -256,8 +259,8 @@ class MainWindow(Adw.ApplicationWindow):
             modes = ["max", "eco", "dex", "mirror", "virtual", "otg"]
             selected_mode = modes[mode_idx] if mode_idx < len(modes) else "max"
 
-            rot_idx = self.combo_rotation.get_selected()
-            rotations = ["auto", "landscape", "portrait"]
+            rot_idx = self.combo_window_orientation.get_selected()
+            rotations = ["auto", "horizontal", "vertical"]
             selected_rot = rotations[rot_idx] if rot_idx < len(rotations) else "auto"
 
             audio_idx = self.combo_audio.get_selected()
@@ -266,6 +269,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             options = SessionOptions(
                 mode=selected_mode,
+                window_orientation=selected_rot,
                 orientation=selected_rot,
                 lock_laptop=self.switch_laptop_lock.get_active(),
                 audio_route=selected_audio,
