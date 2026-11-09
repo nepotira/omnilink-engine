@@ -1,7 +1,7 @@
 # Project State: OmniLink Mobile Engine
 
 - **Project Name**: OmniLink Mobile Engine (formerly POCO Game Engine)
-- **Version**: 2.0.0 (SemVer 2.0.0)
+- **Version**: 2.1.0 (SemVer 2.0.0)
 - **Status**: Production Ready / Universalized
 - **Repository**: `nepotira/omnilink-engine` (GitHub)
 - **Architecture**:
@@ -17,3 +17,4 @@
   6. **Pure 1:1 Mirroring Mode**: Zero resolution modification, preserving 100% of home screen icon layouts.
   7. **Hardware KVM Mode**: Direct USB HID control with strict device serial binding (`-s "$DEVICE_SERIAL"`), preventing webcam device collision.
   8. **Zero-to-Function Automated Installer**: Automatic udev configuration and dependency checks on first run.
+  9. **PC Window Orientation Controls**: User-selectable window orientation (Automatic dynamic tracking, Forced Horizontal @270, Forced Vertical @0) without device sensor locking.

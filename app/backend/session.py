@@ -21,7 +21,8 @@ class SessionState(enum.Enum):
 @dataclass
 class SessionOptions:
     mode: str = "max"  # max, eco, dex, mirror, virtual, otg
-    orientation: str = "auto"  # auto, landscape, portrait
+    window_orientation: str = "auto"  # auto, horizontal, vertical
+    orientation: str = "auto"  # backwards compatibility alias
     lock_laptop: bool = True
     audio_route: str = "dual"  # dual, pc, off
     screen_off: bool = True
@@ -73,10 +74,12 @@ class SessionManager:
             elif options.mode == "otg":
                 cmd.append("--otg")
 
-            if options.orientation == "landscape":
-                cmd.append("--landscape")
-            elif options.orientation == "portrait":
-                cmd.append("--portrait")
+            if options.window_orientation == "horizontal" or options.orientation == "landscape":
+                cmd.append("--window-horizontal")
+            elif options.window_orientation == "vertical" or options.orientation == "portrait":
+                cmd.append("--window-vertical")
+            else:
+                cmd.append("--window-auto")
 
             if options.lock_laptop:
                 cmd.append("--lock-laptop")
